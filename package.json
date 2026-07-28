@@ -224,13 +224,13 @@
         "category": "Jujutsu"
       },
       {
-        "command": "jj.copyPath",
-        "title": "Copy Path",
+        "command": "jj.copyRelativePath",
+        "title": "Copy Relative Path",
         "category": "Jujutsu"
       },
       {
-        "command": "jj.copyRelativePath",
-        "title": "Copy Relative Path",
+        "command": "jj.copyPath",
+        "title": "Copy Path",
         "category": "Jujutsu"
       }
     ],
@@ -397,14 +397,14 @@
           "group": "inline"
         },
         {
-          "command": "jj.copyPath",
+          "command": "jj.copyRelativePath",
           "when": "scmProvider == jj",
           "group": "1_copypath@1"
         },
         {
-          "command": "jj.copyRelativePath",
+          "command": "jj.copyPath",
           "when": "scmProvider == jj",
-          "group": "1_copypath@1"
+          "group": "1_copypath@2"
         }
       ],
       "scm/resourceFolder/context": [
@@ -424,14 +424,14 @@
           "group": "inline"
         },
         {
-          "command": "jj.copyPath",
+          "command": "jj.copyRelativePath",
           "when": "scmProvider == jj",
           "group": "1_copypath@1"
         },
         {
-          "command": "jj.copyRelativePath",
+          "command": "jj.copyPath",
           "when": "scmProvider == jj",
-          "group": "1_copypath@1"
+          "group": "1_copypath@2"
         }
       ],
       "commandPalette": [

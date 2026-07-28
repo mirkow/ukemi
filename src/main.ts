@@ -1468,7 +1468,7 @@ export async function activate(context: vscode.ExtensionContext) {
         'jj.copyRelativePath',
         async (resourceState: vscode.SourceControlResourceState) => {
           await vscode.env.clipboard.writeText(
-            vscode.workspace.asRelativePath(resourceState.resourceUri),
+            vscode.workspace.asRelativePath(resourceState.resourceUri.fsPath),
           );
         },
       ),
