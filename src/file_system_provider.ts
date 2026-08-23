@@ -21,6 +21,9 @@ import {
   isDescendant,
   pathEquals,
 } from './utils';
+import { fakeEditorPath } from './env';
+import { getLogger } from './logger';
+import * as fs from 'fs';
 
 interface CacheRow {
   uri: Uri;
@@ -135,32 +138,52 @@ export class JJFileSystemProvider implements FileSystemProvider {
     this.cache.set(uri.toString(), cacheValue);
 
     if ('diffOriginalRev' in params) {
-      const originalContent = await repository.getDiffOriginal(
-        params.diffOriginalRev,
-        uri.fsPath,
-      );
-      if (!originalContent) {
+      if (fakeEditorPath && fs.existsSync(fakeEditorPath)) {
         try {
-          const data = await repository.readFile(
+          const originalContent = await repository.getDiffOriginal(
             params.diffOriginalRev,
             uri.fsPath,
           );
-          return data;
-        } catch (e) {
-          if (e instanceof Error && e.message.includes('No such path')) {
-            throw FileSystemError.FileNotFound();
+          if (originalContent) {
+            return originalContent;
           }
-          throw e;
+        } catch (e) {
+          getLogger().error(`getDiffOriginal failed: ${String(e)}`);
         }
       }
-      return originalContent;
+      try {
+        const data = await repository.readFile(
+          `${params.diffOriginalRev}-`,
+          uri.fsPath,
+        );
+        return data;
+      } catch (e) {
+        if (
+          e instanceof Error &&
+          (e.message.includes('No such path') ||
+            e.message.includes('No such file') ||
+            e.message.includes('does not exist') ||
+            e.message.includes('failed to find'))
+        ) {
+          // File was added in this revision; return empty content for the diff's left side
+          return new Uint8Array(0);
+        }
+        throw e;
+      }
     } else {
       try {
         const data = await repository.readFile(params.rev, uri.fsPath);
         return data;
       } catch (e) {
-        if (e instanceof Error && e.message.includes('No such path')) {
-          throw FileSystemError.FileNotFound();
+        if (
+          e instanceof Error &&
+          (e.message.includes('No such path') ||
+            e.message.includes('No such file') ||
+            e.message.includes('does not exist') ||
+            e.message.includes('failed to find'))
+        ) {
+          // File was deleted in this revision; return empty content for the diff's right side
+          return new Uint8Array(0);
         }
         throw e;
       }

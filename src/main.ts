@@ -22,6 +22,7 @@ import { match } from 'arktype';
 import { getActiveTextEditorDiff, pathEquals } from './utils';
 import { openDiff, openFile } from './open_file';
 import {
+  CommitFileTreeItem,
   GraphTreeDataProvider,
   GraphTreeItem,
   GraphTreeView,
@@ -849,6 +850,42 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+      vscode.commands.registerCommand('jj.filterGraph', async () => {
+        try {
+          await graphTreeView.promptFilter();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to filter commits${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('jj.clearGraphFilter', async () => {
+        try {
+          await graphTreeView.clearFilter();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to clear filter${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('jj.refreshGraph', async () => {
+        try {
+          await graphTreeView.refresh();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to refresh commits${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
       vscode.commands.registerCommand('jj.newGraphWebview', async () => {
         const selectedNodes = Array.from(graphWebview.selectedNodes);
         if (selectedNodes.length < 1) {
@@ -1400,7 +1437,22 @@ export async function activate(context: vscode.ExtensionContext) {
             await item.getRepository().new(undefined, [item.getChangeId()]);
           } catch (error) {
             vscode.window.showErrorMessage(
-              `Failed to update to change${error instanceof Error ? `: ${error.message}` : ''}`,
+              `Failed to create new change on this commit${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.edit',
+        showLoading(async (item: GraphTreeItem) => {
+          try {
+            await item.getRepository().editRetryImmutable(item.getChangeId());
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to edit change${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
         }),
@@ -1455,10 +1507,19 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.copyPath',
-        async (resourceState: vscode.SourceControlResourceState) => {
-          await vscode.env.clipboard.writeText(
-            resourceState.resourceUri.fsPath,
-          );
+        async (
+          resource:
+            | vscode.SourceControlResourceState
+            | CommitFileTreeItem
+            | vscode.Uri,
+        ) => {
+          const uri =
+            resource instanceof vscode.Uri
+              ? resource
+              : resource?.resourceUri;
+          if (uri) {
+            await vscode.env.clipboard.writeText(uri.fsPath);
+          }
         },
       ),
     );
@@ -1466,10 +1527,21 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.copyRelativePath',
-        async (resourceState: vscode.SourceControlResourceState) => {
-          await vscode.env.clipboard.writeText(
-            vscode.workspace.asRelativePath(resourceState.resourceUri.fsPath),
-          );
+        async (
+          resource:
+            | vscode.SourceControlResourceState
+            | CommitFileTreeItem
+            | vscode.Uri,
+        ) => {
+          const uri =
+            resource instanceof vscode.Uri
+              ? resource
+              : resource?.resourceUri;
+          if (uri) {
+            await vscode.env.clipboard.writeText(
+              vscode.workspace.asRelativePath(uri.fsPath),
+            );
+          }
         },
       ),
     );

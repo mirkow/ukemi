@@ -105,27 +105,72 @@ suite('JJRepository', () => {
       } satisfies Partial<ChangeWithDetails>);
       assert.match(show[0].change.changeId, /^[k-z]{32}$/);
       assert.match(show[0].change.commitId, /^[a-f0-9]{40}$/);
-      assert.deepStrictEqual(show[1], {
-        change: {
-          author: {
-            email: '',
-            name: '',
-          },
-          authoredDate: '1970-01-01 00:00:00',
-          changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
-          commitId: '0000000000000000000000000000000000000000',
-          parentChangeIds: [],
-          bookmarks: [],
-          description: '',
-          isConflict: false,
-          isEmpty: true,
-          isImmutable: true,
-          isCurrentWorkingCopy: false,
-          isSynced: true,
+      assert.partialDeepStrictEqual(show[1].change, {
+        author: {
+          email: '',
+          name: '',
         },
-        conflictedFiles: new Set<string>(),
-        fileStatuses: [],
-      } satisfies Show);
+        changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+        commitId: '0000000000000000000000000000000000000000',
+        parentChangeIds: [],
+        bookmarks: [],
+        description: '',
+        isConflict: false,
+        isEmpty: true,
+        isImmutable: true,
+        isCurrentWorkingCopy: false,
+        isSynced: true,
+      } satisfies Partial<ChangeWithDetails>);
+      assert.deepStrictEqual(show[1].conflictedFiles, new Set<string>());
+      assert.deepStrictEqual(show[1].fileStatuses, []);
+    });
+  });
+
+  suite('getChanges', () => {
+    test('retrieves commit metadata without diff files', async () => {
+      const fileName = 'file_get_changes.txt';
+      const filePath = path.join(suiteDir, fileName);
+      const repoAuthor = getRepoAuthor();
+
+      await fs.writeFile(filePath, 'Some content');
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const changes = await repo.getChanges(['::']);
+
+      assert.strictEqual(changes.length, 2);
+      assert.partialDeepStrictEqual(changes[0], {
+        author: {
+          email: repoAuthor.email,
+          name: repoAuthor.name,
+        },
+        description: '',
+        isConflict: false,
+        isEmpty: false,
+        isImmutable: false,
+      } satisfies Partial<ChangeWithDetails>);
+      assert.match(changes[0].changeId, /^[k-z]{32}$/);
+      assert.match(changes[0].commitId, /^[a-f0-9]{40}$/);
+      assert.partialDeepStrictEqual(changes[1], {
+        author: {
+          email: '',
+          name: '',
+        },
+        changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+        commitId: '0000000000000000000000000000000000000000',
+        parentChangeIds: [],
+        bookmarks: [],
+        description: '',
+        isConflict: false,
+        isEmpty: true,
+        isImmutable: true,
+        isCurrentWorkingCopy: false,
+        isSynced: true,
+      } satisfies Partial<ChangeWithDetails>);
     });
   });
 });

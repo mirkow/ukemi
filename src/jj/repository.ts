@@ -1,6 +1,7 @@
 import spawn from 'cross-spawn';
 import { pathEquals } from '../utils';
 import fs from 'fs/promises';
+import * as fsSync from 'fs';
 import path from 'path';
 import * as vscode from 'vscode';
 import { SemVer } from '../semver';
@@ -11,9 +12,128 @@ import {
   convertJJErrors,
 } from './cli';
 import { parseJJStatus, parseRenamePaths, filepathToFileset } from './parser';
-import { RepositoryStatus, Show, Operation, ShowTemplateField } from './types';
+import {
+  RepositoryStatus,
+  Show,
+  Operation,
+  ShowTemplateField,
+  ChangeWithDetails,
+} from './types';
 import { getLogger } from '../logger';
 import { fakeEditorPath, prepareFakeeditor } from '../env';
+
+function getChangeTemplateFields(): ShowTemplateField[] {
+  return [
+    {
+      template: 'change_id',
+      setter: (value, show) => {
+        show.change.changeId = value;
+      },
+    },
+    {
+      template: 'commit_id',
+      setter: (value, show) => {
+        show.change.commitId = value;
+      },
+    },
+    {
+      template: 'author.name()',
+      setter: (value, show) => {
+        show.change.author.name = value;
+      },
+    },
+    {
+      template: 'author.email()',
+      setter: (value, show) => {
+        show.change.author.email = value;
+      },
+    },
+    {
+      template: 'author.timestamp().local().format("%F %H:%M:%S")',
+      setter: (value, show) => {
+        show.change.authoredDate = value;
+      },
+    },
+    {
+      template: 'parents.map(|p| p.change_id()).join(",")',
+      setter: (value, show) => {
+        show.change.parentChangeIds = value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean);
+      },
+    },
+    {
+      template: 'bookmarks.map(|b| b.name()).join(",")',
+      setter: (value, show) => {
+        show.change.bookmarks = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      },
+    },
+    {
+      template: 'description',
+      setter: (value, show) => {
+        show.change.description = value;
+      },
+    },
+    {
+      template: 'immutable',
+      setter: (value, show) => {
+        show.change.isImmutable = value === 'true';
+      },
+    },
+    {
+      template: 'empty',
+      setter: (value, show) => {
+        show.change.isEmpty = value === 'true';
+      },
+    },
+    {
+      template: 'conflict',
+      setter: (value, show) => {
+        show.change.isConflict = value === 'true';
+      },
+    },
+    {
+      template: 'current_working_copy',
+      setter: (value, show) => {
+        show.change.isCurrentWorkingCopy = value === 'true';
+      },
+    },
+    {
+      template: 'bookmarks.all(|b| b.synced())',
+      setter: (value, show) => {
+        show.change.isSynced = value === 'true';
+      },
+    },
+  ];
+}
+
+function createEmptyShow(): Show {
+  return {
+    change: {
+      changeId: '',
+      commitId: '',
+      description: '',
+      author: {
+        email: '',
+        name: '',
+      },
+      authoredDate: '',
+      parentChangeIds: [],
+      bookmarks: [],
+      isEmpty: false,
+      isConflict: false,
+      isImmutable: false,
+      isCurrentWorkingCopy: false,
+      isSynced: false,
+    },
+    fileStatuses: [],
+    conflictedFiles: new Set<string>(),
+  };
+}
 
 export class JJRepository {
   statusCache: RepositoryStatus | undefined;
@@ -211,9 +331,77 @@ export class JJRepository {
     return results[0];
   }
 
+  async getChanges(
+    revsets: string[],
+    options: { noIntegrate?: boolean; limit?: number } = {},
+  ): Promise<ChangeWithDetails[]> {
+    const revSeparator = '__ඞඞ__\n';
+    const fieldSeparator = '__ඞ__';
+    const templateFields = getChangeTemplateFields();
+    const template =
+      templateFields
+        .map((field) => field.template)
+        .join(` ++ "${fieldSeparator}" ++ `) + ` ++ "${revSeparator}"`;
+
+    const logArgs = [
+      'log',
+      '-T',
+      template,
+      '--no-graph',
+      '--no-pager',
+      ...(options.limit !== undefined ? ['-n', options.limit.toString()] : []),
+      ...revsets.flatMap((revset) => ['-r', revset]),
+    ];
+    if (
+      options.noIntegrate &&
+      this.jjVersion.isAtLeast(SemVer.parse('0.41.0'))
+    ) {
+      logArgs.unshift('--no-integrate-operation');
+    }
+
+    const output = (
+      await handleJJCommand(
+        this.spawnJJ(logArgs, {
+          timeout: 5000,
+          cwd: this.repositoryRoot,
+        }),
+      )
+    ).toString();
+
+    if (!output) {
+      throw new Error(
+        "No output from jj log. Maybe the revision couldn't be found?",
+      );
+    }
+
+    const revResults = output.split(revSeparator).slice(0, -1);
+    return revResults.map((revResult) => {
+      const fields = revResult.split(fieldSeparator);
+      if (fields.length > templateFields.length) {
+        throw new Error(
+          'Separator found in a field value. This is not supported.',
+        );
+      } else if (fields.length < templateFields.length) {
+        throw new Error('Missing fields in the output.');
+      }
+      const show = createEmptyShow();
+
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        const value = field.trim();
+        const templateField = templateFields[i];
+        if (templateField.setter) {
+          templateField.setter(value, show);
+        }
+      }
+
+      return show.change;
+    });
+  }
+
   async showAll(
     revsets: string[],
-    options: { noIntegrate?: boolean } = {},
+    options: { noIntegrate?: boolean; limit?: number } = {},
   ): Promise<Show[]> {
     const revSeparator = '__ඞඞ__\n';
     const fieldSeparator = '__ඞ__';
@@ -221,92 +409,7 @@ export class JJRepository {
     const isConflictDetectionSupported = this.jjVersion.isAtLeast(
       SemVer.parse('0.26.0'),
     );
-    const templateFields: ShowTemplateField[] = [
-      {
-        template: 'change_id',
-        setter: (value, show) => {
-          show.change.changeId = value;
-        },
-      },
-      {
-        template: 'commit_id',
-        setter: (value, show) => {
-          show.change.commitId = value;
-        },
-      },
-      {
-        template: 'author.name()',
-        setter: (value, show) => {
-          show.change.author.name = value;
-        },
-      },
-      {
-        template: 'author.email()',
-        setter: (value, show) => {
-          show.change.author.email = value;
-        },
-      },
-      {
-        template: 'author.timestamp().local().format("%F %H:%M:%S")',
-        setter: (value, show) => {
-          show.change.authoredDate = value;
-        },
-      },
-      {
-        template: 'parents.map(|p| p.change_id()).join(",")',
-        setter: (value, show) => {
-          show.change.parentChangeIds = value
-            .split(',')
-            .map((id) => id.trim())
-            .filter(Boolean);
-        },
-      },
-      {
-        template: 'bookmarks.map(|b| b.name()).join(",")',
-        setter: (value, show) => {
-          show.change.bookmarks = value
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-        },
-      },
-      {
-        template: 'description',
-        setter: (value, show) => {
-          show.change.description = value;
-        },
-      },
-      {
-        template: 'immutable',
-        setter: (value, show) => {
-          show.change.isImmutable = value === 'true';
-        },
-      },
-      {
-        template: 'empty',
-        setter: (value, show) => {
-          show.change.isEmpty = value === 'true';
-        },
-      },
-      {
-        template: 'conflict',
-        setter: (value, show) => {
-          show.change.isConflict = value === 'true';
-        },
-      },
-      {
-        template: 'current_working_copy',
-        setter: (value, show) => {
-          show.change.isCurrentWorkingCopy = value === 'true';
-        },
-      },
-      {
-        template: 'bookmarks.all(|b| b.synced())',
-        setter: (value, show) => {
-          show.change.isSynced = value === 'true';
-        },
-      },
-    ];
+    const templateFields: ShowTemplateField[] = getChangeTemplateFields();
     if (isConflictDetectionSupported) {
       templateFields.push({
         template: `diff.files().map(|entry| entry.status() ++ "${summarySeparator}" ++ entry.source().path().display() ++ "${summarySeparator}" ++ entry.target().path().display() ++ "${summarySeparator}" ++ entry.target().conflict()).join("\n")`,
@@ -325,6 +428,7 @@ export class JJRepository {
       template,
       '--no-graph',
       '--no-pager',
+      ...(options.limit !== undefined ? ['-n', options.limit.toString()] : []),
       ...revsets.flatMap((revset) => ['-r', revset]),
     ];
     if (
@@ -359,27 +463,7 @@ export class JJRepository {
       } else if (fields.length < templateFields.length) {
         throw new Error('Missing fields in the output.');
       }
-      const ret: Show = {
-        change: {
-          changeId: '',
-          commitId: '',
-          description: '',
-          author: {
-            email: '',
-            name: '',
-          },
-          authoredDate: '',
-          parentChangeIds: [],
-          bookmarks: [],
-          isEmpty: false,
-          isConflict: false,
-          isImmutable: false,
-          isCurrentWorkingCopy: false,
-          isSynced: false,
-        },
-        fileStatuses: [],
-        conflictedFiles: new Set<string>(),
-      };
+      const ret: Show = createEmptyShow();
 
       for (let i = 0; i < fields.length; i++) {
         const field = fields[i];
@@ -1125,6 +1209,9 @@ export class JJRepository {
     rev: string,
     filepath: string,
   ): Promise<Buffer | undefined> {
+    if (!fakeEditorPath || !fsSync.existsSync(fakeEditorPath)) {
+      return undefined;
+    }
     const { cleanup, envVars } = await prepareFakeeditor();
 
     const output = await new Promise<string>((resolve, reject) => {
