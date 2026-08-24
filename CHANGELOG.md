@@ -2,10 +2,14 @@
 
 ## 0.0.13
 
-- Added quick filter to Commits view (search across description, author, and filenames).
-- Added collapsible 'files' tree item under commits with diff visualization.
-- Restored child commit hierarchy in Commits tree view.
-- Added 'New commit on this' and 'Edit' context actions with inline buttons.
+- Support expanding commits in the Commits tree view to see touched files under a collapsible 'files' node and inspect diffs.
+- Restore child commit hierarchy in Commits tree view.
+- Add collapsible list of changed files to Source Control Graph webview with inline diff and copy path actions.
+- Add file status indicators (added, modified, deleted, renamed) in commit file list.
+- Fix diff viewer for added and deleted files in JJ file system provider.
+- Add quick filter for commits view searching description, author, and touched files.
+- Add Edit action and inline edit icon on commits.
+- Display italicized relative commit age.
 
 ## 0.0.12
 

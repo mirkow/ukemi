@@ -3,12 +3,42 @@ import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
 import path from 'path';
 import { getGraphConfig } from './config';
+import { toJJUri } from './uri';
 
-type Message = {
-  command: string;
-  changeId: string;
-  selectedNodes: string[];
-};
+type Message =
+  | {
+      command: 'webviewReady';
+    }
+  | {
+      command: 'editChange';
+      changeId: string;
+    }
+  | {
+      command: 'selectChange';
+      selectedNodes: string[];
+    }
+  | {
+      command: 'getCommitFiles';
+      changeId: string;
+    }
+  | {
+      command: 'openFileDiff';
+      changeId: string;
+      fileStatus: {
+        type: 'A' | 'M' | 'D' | 'R' | 'C';
+        file: string;
+        path: string;
+        renamedFrom?: string;
+      };
+    }
+  | {
+      command: 'copyPath';
+      path: string;
+    }
+  | {
+      command: 'copyRelativePath';
+      file: string;
+    };
 
 export class ChangeNode {
   constructor(
@@ -26,6 +56,7 @@ export class ChangeNode {
     readonly email?: string,
     readonly timestamp?: string,
     readonly timestampAgo?: string,
+    readonly isEmpty?: boolean,
   ) {}
 }
 
@@ -114,6 +145,80 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
             'jjGraphView.nodesSelected',
             message.selectedNodes.length,
           );
+          break;
+        case 'getCommitFiles':
+          try {
+            const showResult = await this.repository.show(message.changeId, {
+              noIntegrate: true,
+            });
+            await this.panel?.webview.postMessage({
+              command: 'commitFilesLoaded',
+              changeId: message.changeId,
+              files: showResult.fileStatuses,
+            });
+          } catch (error) {
+            await this.panel?.webview.postMessage({
+              command: 'commitFilesLoaded',
+              changeId: message.changeId,
+              files: [],
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          break;
+        case 'openFileDiff': {
+          try {
+            const { changeId, fileStatus } = message;
+            const changes = await this.repository.getChanges([changeId], {
+              noIntegrate: true,
+            });
+            const change = changes[0];
+            const originalRev = change?.parentChangeIds?.[0] || `${changeId}-`;
+            const fromPath = fileStatus.renamedFrom || fileStatus.file;
+            const leftUri = toJJUri(
+              vscode.Uri.file(
+                path.join(this.repository.repositoryRoot, fromPath),
+              ),
+              { diffOriginalRev: originalRev },
+            );
+            const rightUri =
+              change?.isCurrentWorkingCopy && fileStatus.type !== 'D'
+                ? vscode.Uri.file(
+                    path.join(this.repository.repositoryRoot, fileStatus.file),
+                  )
+                : toJJUri(
+                    vscode.Uri.file(
+                      path.join(
+                        this.repository.repositoryRoot,
+                        fileStatus.file,
+                      ),
+                    ),
+                    { rev: changeId },
+                  );
+            const shortChangeId = changeId.slice(0, 8);
+            const shortOriginalRev = originalRev.slice(0, 8);
+            const diffTitle = `${path.basename(fileStatus.file)} (${shortChangeId} vs ${shortOriginalRev})`;
+            await vscode.commands.executeCommand(
+              'vscode.diff',
+              leftUri,
+              rightUri,
+              diffTitle,
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to open diff: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          break;
+        }
+        case 'copyPath':
+          if (message.path) {
+            await vscode.env.clipboard.writeText(message.path);
+          }
+          break;
+        case 'copyRelativePath':
+          if (message.file) {
+            await vscode.env.clipboard.writeText(message.file);
+          }
           break;
       }
     });
@@ -326,6 +431,7 @@ export function parseJJLog(output: string): ChangeNode[] {
     }
 
     const isImmutable = isImmutableStr.trim() === 'true';
+    const isEmpty = isEmptyStr.trim() === 'true';
 
     // Construct simplified label (though frontend uses description directly now)
     const formattedLabel = `${description}`;
@@ -346,6 +452,7 @@ export function parseJJLog(output: string): ChangeNode[] {
         email,
         timestamp,
         timestampAgo,
+        isEmpty,
       ),
     );
   }
