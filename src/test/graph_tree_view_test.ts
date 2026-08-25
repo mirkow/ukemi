@@ -60,6 +60,7 @@ suite('GraphTreeView', () => {
       TreeItemCollapsibleState.Collapsed,
     );
     assert.strictEqual(provider.getParent(firstCommit), undefined);
+    assert.match(firstCommit.getCommitId(), /^[a-f0-9]{40}$/);
   });
 
   test('getChildren on a commit returns files group and child commits', async () => {

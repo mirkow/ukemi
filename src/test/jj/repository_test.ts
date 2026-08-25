@@ -173,6 +173,48 @@ suite('JJRepository', () => {
       } satisfies Partial<ChangeWithDetails>);
     });
   });
+
+  suite('rebase', () => {
+    test('rebases a revision onto a destination revision', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const fileA = path.join(suiteDir, 'rebase_a.txt');
+      await fs.writeFile(fileA, 'A content');
+      await repo.describe('@', 'Commit A');
+      const showA = await repo.show('@');
+      const changeA = showA.change.changeId;
+      await repo.new();
+
+      const fileB = path.join(suiteDir, 'rebase_b.txt');
+      await fs.writeFile(fileB, 'B content');
+      await repo.describe('@', 'Commit B');
+      await repo.new();
+
+      const fileC = path.join(suiteDir, 'rebase_c.txt');
+      await fs.writeFile(fileC, 'C content');
+      await repo.describe('@', 'Commit C');
+      const showCBefore = await repo.show('@');
+      const changeC = showCBefore.change.changeId;
+      await repo.new();
+
+      // Rebase C onto A
+      await repo.rebase({
+        sourceRev: changeC,
+        destRev: changeA,
+      });
+
+      const showC = await repo.show(changeC);
+      assert.ok(
+        showC.change.parentChangeIds.includes(changeA),
+        'Expected Commit C parent to be Commit A after rebase',
+      );
+    });
+  });
 });
 
 suite('parseRenamePaths', () => {

@@ -226,6 +226,17 @@
         "category": "Jujutsu"
       },
       {
+        "command": "jj.copyCommitId",
+        "title": "Copy Commit ID",
+        "category": "Jujutsu"
+      },
+      {
+        "command": "jj.rebase",
+        "title": "Rebase...",
+        "category": "Jujutsu",
+        "icon": "$(git-branch)"
+      },
+      {
         "command": "jj.edit",
         "title": "Edit",
         "category": "Jujutsu",
@@ -347,37 +358,47 @@
         },
         {
           "command": "jj.copyFullChangeId",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@1"
         },
         {
           "command": "jj.copyShortChangeId",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@2"
         },
         {
-          "command": "jj.copyDescription",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "command": "jj.copyCommitId",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@3"
         },
         {
-          "command": "jj.edit",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "command": "jj.copyDescription",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "1_item_copy@4"
+        },
+        {
+          "command": "jj.rebase",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@1"
         },
         {
-          "command": "jj.update",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "command": "jj.edit",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@2"
+        },
+        {
+          "command": "jj.update",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@3"
         },
         {
           "command": "jj.abandon",
           "when": "view == jjGraph && viewItem == mutable",
-          "group": "2_item_action@3"
+          "group": "2_item_action@4"
         },
         {
           "command": "jj.edit",
-          "when": "view == jjGraph && viewItem != commitFile",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "inline@1"
         },
         {

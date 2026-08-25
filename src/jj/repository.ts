@@ -1003,6 +1003,60 @@ export class JJRepository {
     );
   }
 
+  async rebaseRetryImmutable({
+    sourceRev,
+    destRev,
+  }: {
+    sourceRev: string;
+    destRev: string;
+  }) {
+    try {
+      return await this.rebase({ sourceRev, destRev });
+    } catch (e) {
+      if (e instanceof ImmutableError) {
+        const choice = await vscode.window.showQuickPick(['Continue'], {
+          title: `${sourceRev} is immutable, are you sure?`,
+        });
+        if (!choice) {
+          return;
+        }
+        return await this.rebase({
+          sourceRev,
+          destRev,
+          ignoreImmutable: true,
+        });
+      }
+      throw e;
+    }
+  }
+
+  async rebase({
+    sourceRev,
+    destRev,
+    ignoreImmutable = false,
+  }: {
+    sourceRev: string;
+    destRev: string;
+    ignoreImmutable?: boolean;
+  }) {
+    return await handleJJCommand(
+      this.spawnJJ(
+        [
+          'rebase',
+          '-r',
+          sourceRev,
+          '-d',
+          destRev,
+          ...(ignoreImmutable ? ['--ignore-immutable'] : []),
+        ],
+        {
+          timeout: 10000,
+          cwd: this.repositoryRoot,
+        },
+      ),
+    );
+  }
+
   async restoreRetryImmutable(rev?: string, filepaths?: string[]) {
     try {
       return await this.restore(rev, filepaths);

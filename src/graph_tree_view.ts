@@ -172,6 +172,10 @@ export class GraphTreeItem extends TreeItem {
     return this.change.changeId;
   }
 
+  getCommitId(): string {
+    return this.change.commitId;
+  }
+
   getChange(): ChangeWithDetails {
     return this.change;
   }
