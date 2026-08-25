@@ -4,7 +4,9 @@ import fs from 'fs/promises';
 import { TreeItemCollapsibleState, TreeView, Uri } from 'vscode';
 import {
   CommitFileTreeItem,
+  CommitFilesGroupTreeItem,
   GraphTreeDataProvider,
+  GraphTreeElement,
   GraphTreeItem,
 } from '../graph_tree_view';
 import { JJRepository } from '../jj/repository';
@@ -13,11 +15,11 @@ import { getJJPath, getRepoPath } from './utils';
 import { getParams } from '../uri';
 import { formatRelativeTime, toItalic } from '../utils';
 
-function createMockTreeView(): TreeView<GraphTreeItem | CommitFileTreeItem> {
+function createMockTreeView(): TreeView<GraphTreeElement> {
   return {
     visible: false,
     reveal: async () => {},
-  } as unknown as TreeView<GraphTreeItem | CommitFileTreeItem>;
+  } as unknown as TreeView<GraphTreeElement>;
 }
 
 suite('GraphTreeView', () => {
@@ -60,11 +62,17 @@ suite('GraphTreeView', () => {
     assert.strictEqual(provider.getParent(firstCommit), undefined);
   });
 
-  test('getChildren on a commit lazily loads changed files and opens diff', async () => {
+  test('getChildren on a commit returns files group and child commits', async () => {
     const fileName = 'tree_lazy_file.txt';
     const filePath = path.join(suiteDir, fileName);
     await fs.writeFile(filePath, 'Lazy content');
-    await repo.describe('@', 'Test commit 2');
+    await repo.describe('@', 'Test commit parent');
+    await repo.new();
+
+    const childFileName = 'tree_child_file.txt';
+    const childFilePath = path.join(suiteDir, childFileName);
+    await fs.writeFile(childFilePath, 'Child content');
+    await repo.describe('@', 'Test commit child');
     await repo.new();
 
     const provider = new GraphTreeDataProvider(repo);
@@ -72,12 +80,50 @@ suite('GraphTreeView', () => {
 
     await provider.refresh(mockTreeView);
 
-    const rootItems = (await provider.getChildren()) as GraphTreeItem[];
-    const targetCommit = rootItems[0];
+    async function findCommitInTree(
+      desc: string,
+      element?: GraphTreeElement,
+    ): Promise<GraphTreeItem | undefined> {
+      const children = await provider.getChildren(element);
+      for (const child of children) {
+        if (child instanceof GraphTreeItem) {
+          if (child.getDescription().includes(desc)) {
+            return child;
+          }
+          const found = await findCommitInTree(desc, child);
+          if (found) {
+            return found;
+          }
+        }
+      }
+      return undefined;
+    }
 
-    // Lazy load files
+    const parentCommit = await findCommitInTree('Test commit parent');
+    assert.ok(parentCommit, 'Expected to find parent commit in tree');
+
+    // Children of parent commit should contain "files" group AND the child commit
+    const commitChildren = await provider.getChildren(parentCommit);
+    assert.ok(commitChildren.length >= 2, 'Expected files group and child commit');
+
+    const filesGroup = commitChildren.find(
+      (item) => item instanceof CommitFilesGroupTreeItem,
+    ) as CommitFilesGroupTreeItem;
+    assert.ok(filesGroup, 'Expected files group item under commit');
+    assert.strictEqual(filesGroup.label, 'files');
+    assert.strictEqual(provider.getParent(filesGroup), parentCommit);
+
+    const childCommit = commitChildren.find(
+      (item) =>
+        item instanceof GraphTreeItem &&
+        item.getDescription().includes('Test commit child'),
+    ) as GraphTreeItem;
+    assert.ok(childCommit, 'Expected child commit under parent commit');
+    assert.strictEqual(provider.getParent(childCommit), parentCommit);
+
+    // Expanding "files" group lazily loads files
     const fileItems = (await provider.getChildren(
-      targetCommit,
+      filesGroup,
     )) as CommitFileTreeItem[];
     assert.ok(fileItems.length >= 1, 'Expected at least 1 changed file item');
 
@@ -94,7 +140,7 @@ suite('GraphTreeView', () => {
     assert.strictEqual(fileItem.contextValue, 'commitFile');
     assert.ok(fileItem.iconPath, 'Expected iconPath on fileItem');
     assert.ok(fileItem.tooltip, 'Expected tooltip on fileItem');
-    assert.strictEqual(provider.getParent(fileItem), targetCommit);
+    assert.strictEqual(provider.getParent(fileItem), filesGroup);
 
     // Verify diff command on file item
     assert.ok(fileItem.command, 'Expected command on file item');
@@ -111,11 +157,11 @@ suite('GraphTreeView', () => {
     assert.ok('diffOriginalRev' in leftParams);
     assert.strictEqual(
       leftParams.diffOriginalRev,
-      targetCommit.getChangeId(),
+      parentCommit.getParentChangeIds()?.[0] || `${parentCommit.getChangeId()}-`,
     );
 
     assert.ok(
-      title.includes(targetCommit.getChangeId().slice(0, 8)),
+      title.includes(parentCommit.getChangeId().slice(0, 8)),
       'Title should contain short change ID',
     );
 
@@ -209,7 +255,35 @@ suite('GraphTreeView', () => {
     // Clear filter
     await provider.setFilter('');
     assert.strictEqual(provider.getFilter(), '');
-    const allItems = (await provider.getChildren()) as GraphTreeItem[];
-    assert.ok(allItems.length >= 2, 'Expected all commits after clear');
+    const rootItems = (await provider.getChildren()) as GraphTreeItem[];
+    assert.ok(rootItems.length >= 1, 'Expected root commits after clear');
+
+    async function hasCommitInTree(
+      desc: string,
+      element?: GraphTreeElement,
+    ): Promise<boolean> {
+      const children = await provider.getChildren(element);
+      for (const child of children) {
+        if (child instanceof GraphTreeItem) {
+          if (child.getDescription().includes(desc)) {
+            return true;
+          }
+          const found = await hasCommitInTree(desc, child);
+          if (found) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    assert.ok(
+      await hasCommitInTree('Alpha feature'),
+      'Expected Alpha commit in tree after clear',
+    );
+    assert.ok(
+      await hasCommitInTree('Beta bugfix'),
+      'Expected Beta commit in tree after clear',
+    );
   });
 });

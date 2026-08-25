@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.0.13
+
+- Added quick filter to Commits view (search across description, author, and filenames).
+- Added collapsible 'files' tree item under commits with diff visualization.
+- Restored child commit hierarchy in Commits tree view.
+- Added 'New commit on this' and 'Edit' context actions with inline buttons.
+
 ## 0.0.12
 
 - adds compact mode by @sesceu in https://github.com/sbarfurth/ukemi/pull/51

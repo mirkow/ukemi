@@ -54,16 +54,19 @@ function getChangeTooltip(change: ChangeWithDetails): MarkdownString {
   return str;
 }
 
+export type GraphTreeElement =
+  | GraphTreeItem
+  | CommitFilesGroupTreeItem
+  | CommitFileTreeItem;
+
 export class GraphTreeView {
   private readonly subscriptions: {
     dispose(): unknown;
   }[] = [];
-  private readonly graphTreeView: TreeView<GraphTreeItem | CommitFileTreeItem>;
+  private readonly graphTreeView: TreeView<GraphTreeElement>;
 
   constructor(private readonly treeDataProvider: GraphTreeDataProvider) {
-    this.graphTreeView = window.createTreeView<
-      GraphTreeItem | CommitFileTreeItem
-    >('jjGraph', {
+    this.graphTreeView = window.createTreeView<GraphTreeElement>('jjGraph', {
       treeDataProvider: this.treeDataProvider,
     });
     this.updateTitle(this.treeDataProvider.getSelectedRepo().repositoryRoot);
@@ -138,13 +141,15 @@ export class GraphTreeView {
 export class GraphTreeItem extends TreeItem {
   constructor(
     private readonly change: ChangeWithDetails,
+    private readonly childrenChangeIds: string[],
     private readonly dataProvider: GraphTreeDataProvider,
   ) {
+    const hasChildren = childrenChangeIds.length > 0 || !change.isEmpty;
     super(
       getChangeDescription(change),
-      change.isEmpty
-        ? TreeItemCollapsibleState.None
-        : TreeItemCollapsibleState.Collapsed,
+      hasChildren
+        ? TreeItemCollapsibleState.Collapsed
+        : TreeItemCollapsibleState.None,
     );
     this.id = this.change.changeId;
     this.iconPath = this.getIcon();
@@ -169,6 +174,10 @@ export class GraphTreeItem extends TreeItem {
 
   getChange(): ChangeWithDetails {
     return this.change;
+  }
+
+  getChildrenChangeIds(): string[] {
+    return this.childrenChangeIds;
   }
 
   getDescription(): string {
@@ -210,6 +219,42 @@ export class GraphTreeItem extends TreeItem {
   }
 }
 
+export class CommitFilesGroupTreeItem extends TreeItem {
+  constructor(
+    public readonly change: ChangeWithDetails,
+    public readonly parentCommit: GraphTreeItem,
+    private readonly dataProvider: GraphTreeDataProvider,
+  ) {
+    super('files', TreeItemCollapsibleState.Collapsed);
+    this.id = `${change.changeId}:files`;
+    this.iconPath = new ThemeIcon('files');
+    this.contextValue = 'commitFilesGroup';
+    this.tooltip = `Changed files for ${change.changeId.slice(0, 8)}`;
+  }
+
+  getChangeId(): string {
+    return this.change.changeId;
+  }
+
+  getChange(): ChangeWithDetails {
+    return this.change;
+  }
+
+  getRepository(): JJRepository {
+    return this.dataProvider.getSelectedRepo();
+  }
+
+  equals(other: TreeItem): boolean {
+    if (!(other instanceof CommitFilesGroupTreeItem)) {
+      return false;
+    }
+    return (
+      this.id === other.id &&
+      this.collapsibleState === other.collapsibleState
+    );
+  }
+}
+
 function getFileIcon(type: FileStatusType): ThemeIcon {
   switch (type) {
     case 'A':
@@ -246,7 +291,7 @@ export class CommitFileTreeItem extends TreeItem {
   constructor(
     public readonly fileStatus: FileStatus,
     public readonly change: ChangeWithDetails,
-    public readonly parentItem: GraphTreeItem,
+    public readonly parentGroup: CommitFilesGroupTreeItem,
     private readonly dataProvider: GraphTreeDataProvider,
   ) {
     const filename = path.basename(fileStatus.file);
@@ -287,9 +332,12 @@ export class CommitFileTreeItem extends TreeItem {
 
     this.contextValue = 'commitFile';
 
-    const leftUri = toJJUri(Uri.file(fileStatus.path), {
-      diffOriginalRev: change.changeId,
-    });
+    const originalRev = change.parentChangeIds?.[0] || `${change.changeId}-`;
+    const fromPath = fileStatus.renamedFrom || fileStatus.file;
+    const leftUri = toJJUri(
+      Uri.file(path.join(this.dataProvider.getSelectedRepo().repositoryRoot, fromPath)),
+      { diffOriginalRev: originalRev },
+    );
     const rightUri =
       change.isCurrentWorkingCopy && fileStatus.type !== 'D'
         ? Uri.file(fileStatus.path)
@@ -335,17 +383,18 @@ export class CommitFileTreeItem extends TreeItem {
 }
 
 export class GraphTreeDataProvider
-  implements TreeDataProvider<GraphTreeItem | CommitFileTreeItem>
+  implements TreeDataProvider<GraphTreeElement>
 {
   private readonly onDidChangeTreeDataInternal: EventEmitter<
-    GraphTreeItem | CommitFileTreeItem | undefined | null | void
+    GraphTreeElement | undefined | null | void
   > = new EventEmitter();
   onDidChangeTreeData: Event<
-    GraphTreeItem | CommitFileTreeItem | undefined | null | void
+    GraphTreeElement | undefined | null | void
   > = this.onDidChangeTreeDataInternal.event;
 
   private filterQuery = '';
   private items: GraphTreeItem[] = [];
+  private itemChangeIds = new Set<string>();
   private readonly filesCache: Map<string, CommitFileTreeItem[]> = new Map();
   private workingCopyChange: ChangeWithDetails | undefined;
   private isLoaded = false;
@@ -359,7 +408,7 @@ export class GraphTreeDataProvider
 
   async setFilter(
     filter: string,
-    treeView?: TreeView<GraphTreeItem | CommitFileTreeItem>,
+    treeView?: TreeView<GraphTreeElement>,
   ) {
     this.filterQuery = filter;
     await this.refresh(treeView);
@@ -370,28 +419,51 @@ export class GraphTreeDataProvider
   }
 
   async getChildren(
-    element?: GraphTreeItem | CommitFileTreeItem,
-  ): Promise<(GraphTreeItem | CommitFileTreeItem)[]> {
+    element?: GraphTreeElement,
+  ): Promise<GraphTreeElement[]> {
+    if (!this.isLoaded) {
+      await this.loadChanges();
+    }
+
     if (!element) {
-      if (!this.isLoaded) {
-        await this.loadChanges();
-      }
-      return this.items;
+      // The item is a root item in the graph if none of its parent change IDs are
+      // present in the itemChangeIds set.
+      const rootItems = this.items.filter((item) =>
+        item.getParentChangeIds().every((id) => !this.itemChangeIds.has(id)),
+      );
+      return rootItems.length > 0 ? rootItems : this.items;
     }
 
     if (element instanceof GraphTreeItem) {
-      if (element.getChange().isEmpty) {
-        return [];
+      const children: GraphTreeElement[] = [];
+
+      // 1. "files" group node if commit is not empty
+      if (!element.getChange().isEmpty) {
+        children.push(
+          new CommitFilesGroupTreeItem(element.getChange(), element, this),
+        );
       }
 
-      const cached = this.filesCache.get(element.getChangeId());
+      // 2. Child commits (commits that have this commit as parent)
+      const childCommitIds = element.getChildrenChangeIds();
+      const childCommits = this.items.filter((item) =>
+        childCommitIds.includes(item.getChangeId()),
+      );
+      children.push(...childCommits);
+
+      return children;
+    }
+
+    if (element instanceof CommitFilesGroupTreeItem) {
+      const changeId = element.getChangeId();
+      const cached = this.filesCache.get(changeId);
       if (cached) {
         return cached;
       }
 
       try {
         const showResult = await this.selectedRepository.show(
-          element.getChangeId(),
+          changeId,
           { noIntegrate: true },
         );
         const fileItems = showResult.fileStatuses.map(
@@ -403,11 +475,11 @@ export class GraphTreeDataProvider
               this,
             ),
         );
-        this.filesCache.set(element.getChangeId(), fileItems);
+        this.filesCache.set(changeId, fileItems);
         return fileItems;
       } catch (e) {
         getLogger().error(
-          `Failed to get changed files for change ${element.getChangeId()}: ${String(e)}`,
+          `Failed to get changed files for change ${changeId}: ${String(e)}`,
         );
         return [];
       }
@@ -474,16 +546,33 @@ export class GraphTreeDataProvider
         }
 
         const items: GraphTreeItem[] = [];
+        const itemChangeIds = new Set<string>();
+
         for (const change of changes) {
-          // Don't render the working copy in the graph.
           if (change.isCurrentWorkingCopy) {
             this.workingCopyChange = change;
             continue;
           }
-          const item = new GraphTreeItem(change, this);
+          itemChangeIds.add(change.changeId);
+        }
+
+        for (const change of changes) {
+          if (change.isCurrentWorkingCopy) {
+            continue;
+          }
+          const childrenChangeIds = changes
+            .filter(
+              (c) =>
+                !c.isCurrentWorkingCopy &&
+                c.parentChangeIds.includes(change.changeId),
+            )
+            .map((c) => c.changeId);
+          const item = new GraphTreeItem(change, childrenChangeIds, this);
           items.push(item);
         }
+
         this.items = items;
+        this.itemChangeIds = itemChangeIds;
         this.isLoaded = true;
       } catch (e) {
         getLogger().error(`Failed to load changes: ${String(e)}`);
@@ -495,7 +584,7 @@ export class GraphTreeDataProvider
   }
 
   async refresh(
-    treeView?: TreeView<GraphTreeItem | CommitFileTreeItem>,
+    treeView?: TreeView<GraphTreeElement>,
   ) {
     const prev = [...this.items];
 
@@ -518,7 +607,7 @@ export class GraphTreeDataProvider
 
   async setSelectedRepo(
     repo: JJRepository,
-    treeView?: TreeView<GraphTreeItem | CommitFileTreeItem>,
+    treeView?: TreeView<GraphTreeElement>,
   ) {
     const prevRepo = this.selectedRepository;
     this.selectedRepository = repo;
@@ -532,16 +621,26 @@ export class GraphTreeDataProvider
   }
 
   getParent(
-    element: GraphTreeItem | CommitFileTreeItem,
-  ): ProviderResult<GraphTreeItem | CommitFileTreeItem> {
+    element: GraphTreeElement,
+  ): ProviderResult<GraphTreeElement> {
     if (element instanceof CommitFileTreeItem) {
-      return element.parentItem;
+      return element.parentGroup;
+    }
+    if (element instanceof CommitFilesGroupTreeItem) {
+      return element.parentCommit;
+    }
+    if (element instanceof GraphTreeItem) {
+      const parentChangeIds = element.getParentChangeIds();
+      if (parentChangeIds.length === 0) {
+        return undefined;
+      }
+      return this.items.find((item) => item.getChangeId() === parentChangeIds[0]);
     }
     return undefined;
   }
 
   async updateSelection(
-    treeView: TreeView<GraphTreeItem | CommitFileTreeItem>,
+    treeView: TreeView<GraphTreeElement>,
   ) {
     if (!treeView.visible || !this.workingCopyChange) {
       return;
