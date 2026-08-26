@@ -2,14 +2,18 @@
 
 ## 0.0.13
 
-- Support expanding commits in the Commits tree view to see touched files under a collapsible 'files' node and inspect diffs.
-- Restore child commit hierarchy in Commits tree view.
-- Add collapsible list of changed files to Source Control Graph webview with inline diff and copy path actions.
-- Add file status indicators (added, modified, deleted, renamed) in commit file list.
+- Add collapsible list of changed files to both Commits tree view and Source Control Graph webview to inspect diffs and copy paths without checking out.
+- Add file status indicators (added, modified, deleted, renamed) in commit file lists.
+- Add quick filter for Commits tree view searching descriptions, authors, and touched files.
+- Add context menu to Source Control Graph and Commits tree view with actions for:
+  - Copy Commit ID, Change ID, and Description
+  - Edit description
+  - Rebase including descendants (`jj rebase -s`) and Rebase without descendants (`jj rebase -r`) with QuickPick search across descriptions and IDs
+  - Edit, New commit, and Abandon
+- Add JJ Undo button to the title bar of the Source Control Graph view.
+- Display italicized relative commit age in Commits tree view.
 - Fix diff viewer for added and deleted files in JJ file system provider.
-- Add quick filter for commits view searching description, author, and touched files.
-- Add Edit action and inline edit icon on commits.
-- Display italicized relative commit age.
+- Fix copying relative path on non-working copy revision. 
 
 ## 0.0.12
 
