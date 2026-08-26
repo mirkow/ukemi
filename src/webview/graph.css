@@ -23,6 +23,9 @@ body {
 
 /* Transition effects */
 .node-circle circle,
+.node-circle .heart-path,
+.node-circle .diamond-path,
+.node-circle .conflict-x-path,
 .connection-line {
   transition: opacity 0.2s ease-in-out;
 }
@@ -56,12 +59,16 @@ body {
 
 /* Dimming and highlighting effects */
 .node-circle.dimmed circle,
-.node-circle.dimmed .heart-path {
+.node-circle.dimmed .heart-path,
+.node-circle.dimmed .diamond-path,
+.node-circle.dimmed .conflict-x-path {
   opacity: 0.1;
 }
 
 .node-circle.highlighted circle,
-.node-circle.highlighted .heart-path {
+.node-circle.highlighted .heart-path,
+.node-circle.highlighted .diamond-path,
+.node-circle.highlighted .conflict-x-path {
   opacity: 1;
 }
 
@@ -71,6 +78,14 @@ body {
 
 .connection-line.highlighted {
   opacity: 1;
+}
+
+/* Conflict icon styling */
+.conflict-x-path {
+  stroke: var(--vscode-editorError-foreground, #f14c4c);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  fill: none;
 }
 
 /* Child connection styling */
@@ -431,6 +446,10 @@ body {
 
 .file-status-R, .file-tag-R {
   color: var(--vscode-gitDecoration-renamedResourceForeground, #73b7f2);
+}
+
+.file-status-conflict, .file-tag-conflict {
+  color: var(--vscode-editorError-foreground, #f14c4c);
 }
 
 /* File action buttons */

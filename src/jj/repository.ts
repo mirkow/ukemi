@@ -488,12 +488,14 @@ export class JJRepository {
                   status,
                 )
               ) {
+                const isFileConflict = conflict === 'true';
                 if (status === 'renamed' || status === 'copied') {
                   ret.fileStatuses.push({
                     type: status === 'renamed' ? 'R' : 'C',
                     file: targetPath,
                     path: path.join(this.repositoryRoot, targetPath),
                     renamedFrom: sourcePath,
+                    ...(isFileConflict ? { isConflict: true } : {}),
                   });
                 } else {
                   ret.fileStatuses.push({
@@ -505,9 +507,10 @@ export class JJRepository {
                           : 'M',
                     file: targetPath,
                     path: path.join(this.repositoryRoot, targetPath),
+                    ...(isFileConflict ? { isConflict: true } : {}),
                   });
                 }
-                if (conflict === 'true') {
+                if (isFileConflict) {
                   ret.conflictedFiles.add(
                     path.join(this.repositoryRoot, targetPath),
                   );

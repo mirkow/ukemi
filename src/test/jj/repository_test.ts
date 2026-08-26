@@ -1,4 +1,5 @@
 import { parseRenamePaths } from '../../jj/parser';
+import { parseJJLog } from '../../graph_webview';
 import * as assert from 'assert/strict';
 import { JJRepository } from '../../jj/repository';
 import { Change, FileStatus, Show, ChangeWithDetails } from '../../jj/types';
@@ -416,5 +417,33 @@ suite('parseRenamePaths', () => {
   test('should return null for empty input', () => {
     const input = '';
     assert.strictEqual(parseRenamePaths(input), null);
+  });
+});
+
+suite('parseJJLog', () => {
+  test('should parse normal commit', () => {
+    const log =
+      'JJLOGSTART|kkmpptxz|kkm|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago|main|e14df8|e14|○|false|false|false|Initial commit\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].contextValue, 'kkmpptxz');
+    assert.strictEqual(nodes[0].isConflict, false);
+    assert.strictEqual(
+      nodes[0].tooltip,
+      'Initial commit\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
+  });
+
+  test('should parse commit with conflict and include conflict in tooltip', () => {
+    const log =
+      'JJLOGSTART|conflict123|conf|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||c0ff1ee|c0f|○|false|false|true|Resolve conflict\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].contextValue, 'conflict123');
+    assert.strictEqual(nodes[0].isConflict, true);
+    assert.strictEqual(
+      nodes[0].tooltip,
+      'Resolve conflict\n\n(conflict)\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
   });
 });

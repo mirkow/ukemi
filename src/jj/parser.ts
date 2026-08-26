@@ -158,6 +158,12 @@ export async function parseJJStatus(
     }
   }
 
+  for (const fileStatus of fileStatuses) {
+    if (conflictedFiles.has(fileStatus.path)) {
+      fileStatus.isConflict = true;
+    }
+  }
+
   return {
     fileStatuses: fileStatuses,
     workingCopy,

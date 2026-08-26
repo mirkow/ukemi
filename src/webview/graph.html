@@ -302,6 +302,29 @@
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('class', 'node-circle');
 
+        if (change.isConflict) {
+          g.classList.add('has-conflict');
+          // Background circle to clear connection lines behind the X
+          const bgCircle = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'circle',
+          );
+          bgCircle.setAttribute('cx', '6');
+          bgCircle.setAttribute('cy', '6');
+          bgCircle.setAttribute('r', '6');
+          bgCircle.style.fill = 'var(--vscode-editor-background, #1e1e1e)';
+          g.appendChild(bgCircle);
+
+          const xPath = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'path',
+          );
+          xPath.setAttribute('d', 'M 2.5 2.5 L 9.5 9.5 M 9.5 2.5 L 2.5 9.5');
+          xPath.setAttribute('class', 'conflict-x-path');
+          g.appendChild(xPath);
+          return g;
+        }
+
         const isWorkingCopy = change.branchType === '@';
         const radius = isWorkingCopy ? '7' : '5';
 
@@ -681,7 +704,13 @@
           let tagText = '';
           let tagClass = 'file-tag-M';
 
-          if (file.type === 'A') {
+          if (file.isConflict) {
+            statusIconClass = 'codicon-error';
+            statusClass = 'file-status-conflict';
+            statusTooltip = `Conflict: ${normalizedFile} (unresolved conflicts)`;
+            tagText = '(conflict)';
+            tagClass = 'file-tag-conflict';
+          } else if (file.type === 'A') {
             statusIconClass = 'codicon-diff-added';
             statusClass = 'file-status-A';
             statusTooltip = `Added: ${normalizedFile}`;
@@ -838,6 +867,7 @@
           node.dataset.changeId = change.contextValue;
           node.dataset.parentIds = JSON.stringify(change.parentChangeIds || []);
           node.dataset.branchType = change.branchType;
+          node.dataset.isConflict = change.isConflict ? 'true' : 'false';
 
           // Expand chevron button
           const expandBtn = document.createElement('span');
@@ -1104,6 +1134,7 @@
             {
               contextValue: contextValue,
               branchType: node.dataset.branchType,
+              isConflict: node.dataset.isConflict === 'true',
             },
             currentWorkingCopyId,
           );

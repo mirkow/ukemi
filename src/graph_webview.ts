@@ -79,6 +79,7 @@ export class ChangeNode {
     readonly timestamp?: string,
     readonly timestampAgo?: string,
     readonly isEmpty?: boolean,
+    readonly isConflict?: boolean,
   ) {}
 }
 
@@ -382,7 +383,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     }
 
     // Use a custom template to ensure we get all the fields we need in a parseable format
-    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|description
+    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|is_immutable|is_conflict|description
     const template = `
       concat(
         "JJLOGSTART|",
@@ -398,6 +399,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         if(current_working_copy, "@", if(self.working_copies(), "@", if(self.contained_in("visible_heads()"), "◆", "○"))), "|",
         if(self.empty(), "true", "false"), "|",
         if(self.immutable(), "true", "false"), "|",
+        if(self.conflict(), "true", "false"), "|",
         description.first_line(),
         "\\n"
       )
@@ -490,7 +492,8 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         nodeA.label === nodeB.label &&
         nodeA.tooltip === nodeB.tooltip &&
         nodeA.description === nodeB.description &&
-        nodeA.contextValue === nodeB.contextValue
+        nodeA.contextValue === nodeB.contextValue &&
+        nodeA.isConflict === nodeB.isConflict
       );
     });
   }
@@ -514,7 +517,7 @@ export function parseJJLog(output: string): ChangeNode[] {
     const dataPart = line.substring(sentinelIndex + 'JJLOGSTART|'.length);
     const parts = dataPart.split('|');
 
-    if (parts.length < 13) {
+    if (parts.length < 14) {
       continue;
     }
 
@@ -531,6 +534,7 @@ export function parseJJLog(output: string): ChangeNode[] {
       branchIndicator,
       isEmptyStr,
       isImmutableStr,
+      isConflictStr,
       rawDescription,
     ] = parts;
 
@@ -571,16 +575,19 @@ export function parseJJLog(output: string): ChangeNode[] {
 
     const isImmutable = isImmutableStr.trim() === 'true';
     const isEmpty = isEmptyStr.trim() === 'true';
+    const isConflict = isConflictStr.trim() === 'true';
 
     // Construct simplified label (though frontend uses description directly now)
     const formattedLabel = `${description}`;
+    const conflictTooltip = isConflict ? '\n\n(conflict)' : '';
+    const tooltip = `${description}${conflictTooltip}\n\n${email} ${timestamp}`;
 
     changeNodes.push(
       new ChangeNode(
         formattedLabel,
         description,
         isImmutable,
-        `${description}\n\n${email} ${timestamp}`,
+        tooltip,
         changeId,
         shortestChangeId,
         parentChangeIds,
@@ -592,6 +599,7 @@ export function parseJJLog(output: string): ChangeNode[] {
         timestamp,
         timestampAgo,
         isEmpty,
+        isConflict,
       ),
     );
   }

@@ -14,7 +14,7 @@ import {
   ThemeColor,
   Uri,
 } from 'vscode';
-import { ChangeWithDetails, FileStatus, FileStatusType } from './jj/types';
+import { ChangeWithDetails, FileStatus } from './jj/types';
 import { JJRepository } from './jj/repository';
 import { toJJUri } from './uri';
 import { getLogger } from './logger';
@@ -32,6 +32,10 @@ function getChangeDescription(change: ChangeWithDetails): TreeItemLabel {
 
 function getChangeTooltip(change: ChangeWithDetails): MarkdownString {
   const str = new MarkdownString(change.description || '(no description)');
+
+  if (change.isConflict) {
+    str.appendMarkdown('\n\n⚠️ **This commit has unresolved conflicts.**');
+  }
 
   str.appendMarkdown(`\n\n**Change ID:** ${change.changeId}`);
   str.appendMarkdown(`\n\n**Commit ID:** ${change.commitId}`);
@@ -210,6 +214,12 @@ export class GraphTreeItem extends TreeItem {
   }
 
   private getIcon(): ThemeIcon | undefined {
+    if (this.change.isConflict) {
+      return new ThemeIcon(
+        'error',
+        new ThemeColor('jjDecoration.conflictingResourceForeground'),
+      );
+    }
     if (this.change.isImmutable) {
       return new ThemeIcon('lock');
     }
@@ -259,8 +269,14 @@ export class CommitFilesGroupTreeItem extends TreeItem {
   }
 }
 
-function getFileIcon(type: FileStatusType): ThemeIcon {
-  switch (type) {
+function getFileIcon(fileStatus: FileStatus): ThemeIcon {
+  if (fileStatus.isConflict) {
+    return new ThemeIcon(
+      'error',
+      new ThemeColor('jjDecoration.conflictingResourceForeground'),
+    );
+  }
+  switch (fileStatus.type) {
     case 'A':
       return new ThemeIcon(
         'diff-added',
@@ -303,11 +319,13 @@ export class CommitFileTreeItem extends TreeItem {
 
     this.id = `${change.changeId}:${fileStatus.file}`;
     this.resourceUri = Uri.file(fileStatus.path);
-    this.iconPath = getFileIcon(fileStatus.type);
+    this.iconPath = getFileIcon(fileStatus);
 
     const dir = path.dirname(fileStatus.file);
     const dirPrefix = dir !== '.' ? dir : '';
-    if (fileStatus.type === 'R' && fileStatus.renamedFrom) {
+    if (fileStatus.isConflict) {
+      this.description = dirPrefix ? `${dirPrefix} (conflict)` : '(conflict)';
+    } else if (fileStatus.type === 'R' && fileStatus.renamedFrom) {
       this.description = `${fileStatus.renamedFrom} → ${dirPrefix}`.trim();
     } else if (fileStatus.type === 'D') {
       this.description = dirPrefix ? `${dirPrefix} (deleted)` : '(deleted)';
@@ -317,8 +335,9 @@ export class CommitFileTreeItem extends TreeItem {
       this.description = dirPrefix;
     }
 
-    const statusLabel =
-      fileStatus.type === 'A'
+    const statusLabel = fileStatus.isConflict
+      ? 'Conflict'
+      : fileStatus.type === 'A'
         ? 'Added'
         : fileStatus.type === 'D'
           ? 'Deleted'
