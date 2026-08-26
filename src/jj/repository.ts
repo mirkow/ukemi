@@ -1234,6 +1234,18 @@ export class JJRepository {
     return ret;
   }
 
+  async undo(id?: string) {
+    const args = id ? ['undo', id] : ['undo'];
+    return (
+      await handleJJCommand(
+        this.spawnJJ(args, {
+          timeout: 10000,
+          cwd: this.repositoryRoot,
+        }),
+      )
+    ).toString();
+  }
+
   async operationUndo(id: string) {
     return (
       await handleJJCommand(

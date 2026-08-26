@@ -363,7 +363,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 3px 6px;
+  padding: 0 6px;
+  min-height: 22px;
+  box-sizing: border-box;
   cursor: pointer;
   border-radius: 3px;
   font-size: 0.85em;
@@ -383,10 +385,13 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-height: 22px;
+  line-height: 22px;
 }
 
 .commit-file-info .codicon {
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 13px;
   flex-shrink: 0;
 }
 
@@ -430,25 +435,38 @@ body {
 
 /* File action buttons */
 .file-actions {
-  display: none;
+  display: flex;
+  visibility: hidden;
   align-items: center;
   gap: 2px;
   margin-left: 8px;
   flex-shrink: 0;
+  height: 18px;
 }
 
 .commit-file-item:hover .file-actions {
-  display: flex;
+  visibility: visible;
 }
 
 .file-action-btn {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--vscode-icon-foreground);
   border-radius: 2px;
   opacity: 0.8;
+  box-sizing: border-box;
+}
+
+.file-action-btn .codicon {
+  font-size: 12px;
+  line-height: 12px;
 }
 
 .file-action-btn:hover {

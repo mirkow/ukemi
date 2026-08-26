@@ -869,6 +869,26 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.undo',
+        showLoading(async () => {
+          const repository =
+            graphWebview?.repository ?? workspaceSCM.repoSCMs[0]?.repository;
+          if (!repository) {
+            return;
+          }
+          try {
+            await repository.undo();
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to undo${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
       vscode.commands.registerCommand('jj.filterGraph', async () => {
         try {
           await graphTreeView.promptFilter();

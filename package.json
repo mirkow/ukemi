@@ -75,6 +75,12 @@
         "icon": "$(edit)"
       },
       {
+        "command": "jj.undo",
+        "title": "Undo",
+        "category": "Jujutsu",
+        "icon": "$(discard)"
+      },
+      {
         "command": "jj.new",
         "title": "Create new change",
         "category": "Jujutsu",
@@ -315,19 +321,24 @@
           "group": "navigation"
         },
         {
+          "command": "jj.undo",
+          "when": "view == jjGraphWebview",
+          "group": "navigation@1"
+        },
+        {
           "command": "jj.refreshGraphWebview",
           "when": "view == jjGraphWebview",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "jj.newGraphWebview",
           "when": "view == jjGraphWebview && jjGraphView.nodesSelected",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "jj.selectGraphWebviewRepo",
           "when": "view == jjGraphWebview",
-          "group": "navigation"
+          "group": "navigation@4"
         },
         {
           "command": "jj.filterGraph",

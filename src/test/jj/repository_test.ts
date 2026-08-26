@@ -215,6 +215,28 @@ suite('JJRepository', () => {
       );
     });
   });
+
+  suite('undo', () => {
+    test('undoes the last operation', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const beforeShow = await repo.show('@');
+      const beforeDesc = beforeShow.change.description;
+
+      await repo.describe('@', 'Temporary message');
+      const duringShow = await repo.show('@');
+      assert.strictEqual(duringShow.change.description, 'Temporary message');
+
+      await repo.undo();
+      const afterShow = await repo.show('@');
+      assert.strictEqual(afterShow.change.description, beforeDesc);
+    });
+  });
 });
 
 suite('parseRenamePaths', () => {
