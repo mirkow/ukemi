@@ -645,14 +645,33 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.describe',
-        async (resourceGroup: vscode.SourceControlResourceGroup) => {
+        async (
+          arg?:
+            | vscode.SourceControlResourceGroup
+            | GraphTreeItem
+            | { changeId: string },
+        ) => {
           const repository =
-            workspaceSCM.getRepositoryFromResourceGroup(resourceGroup);
+            arg instanceof GraphTreeItem
+              ? arg.getRepository()
+              : arg && 'id' in arg
+                ? workspaceSCM.getRepositoryFromResourceGroup(arg)
+                : workspaceSCM.repoSCMs[0]?.repository;
+
           if (!repository) {
             throw new Error('Repository not found');
           }
 
-          const showResult = await repository.show(resourceGroup.id);
+          const changeId =
+            arg instanceof GraphTreeItem
+              ? arg.getChangeId()
+              : arg && 'id' in arg
+                ? arg.id
+                : arg && 'changeId' in arg
+                  ? arg.changeId
+                  : '@';
+
+          const showResult = await repository.show(changeId);
 
           const message = await vscode.window.showInputBox({
             prompt: 'Provide a description',
@@ -665,7 +684,7 @@ export async function activate(context: vscode.ExtensionContext) {
           }
 
           try {
-            await repository.describeRetryImmutable(resourceGroup.id, message);
+            await repository.describeRetryImmutable(changeId, message);
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,

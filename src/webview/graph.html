@@ -21,6 +21,200 @@
       let currentWorkingCopyId;
       const commitFilesCache = new Map();
       const expandedNodes = new Set();
+      let activeContextMenu = null;
+
+      function hideContextMenu() {
+        if (activeContextMenu) {
+          activeContextMenu.remove();
+          activeContextMenu = null;
+        }
+      }
+
+      document.addEventListener('click', hideContextMenu);
+      document.addEventListener('contextmenu', (e) => {
+        if (
+          !e.target.closest('.change-node') &&
+          !e.target.closest('.commit-file-item')
+        ) {
+          hideContextMenu();
+        }
+      });
+      window.addEventListener('blur', hideContextMenu);
+      window.addEventListener('scroll', hideContextMenu);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideContextMenu();
+        }
+      });
+
+      function showNodeContextMenu(e, change) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+
+        function addItem(label, icon, onClick) {
+          const item = document.createElement('div');
+          item.className = 'context-menu-item';
+          item.innerHTML = `<i class="codicon ${icon}"></i><span>${label}</span>`;
+          item.onclick = (event) => {
+            event.stopPropagation();
+            hideContextMenu();
+            onClick();
+          };
+          menu.appendChild(item);
+        }
+
+        function addSeparator() {
+          const sep = document.createElement('div');
+          sep.className = 'context-menu-separator';
+          menu.appendChild(sep);
+        }
+
+        // Copy actions
+        if (change.commitId) {
+          addItem('Copy Commit ID', 'codicon-copy', () => {
+            vscode.postMessage({ command: 'copyText', text: change.commitId });
+          });
+        }
+
+        addItem('Copy Full Change ID', 'codicon-copy', () => {
+          vscode.postMessage({ command: 'copyText', text: change.contextValue });
+        });
+
+        addItem('Copy Short Change ID', 'codicon-copy', () => {
+          vscode.postMessage({
+            command: 'copyText',
+            text:
+              change.shortestChangeId || change.contextValue.substring(0, 8),
+          });
+        });
+
+        addItem('Copy Description', 'codicon-copy', () => {
+          vscode.postMessage({
+            command: 'copyText',
+            text: (change.description || '').replace(/^\(empty\)\s*/, ''),
+          });
+        });
+
+        addSeparator();
+
+        // Describe action
+        addItem('Edit description...', 'codicon-edit', () => {
+          vscode.postMessage({
+            command: 'describeChange',
+            changeId: change.contextValue,
+          });
+        });
+
+        // Rebase action
+        addItem('Rebase...', 'codicon-git-branch', () => {
+          vscode.postMessage({
+            command: 'rebaseChange',
+            changeId: change.contextValue,
+          });
+        });
+
+        addItem('New commit on this', 'codicon-plus', () => {
+          vscode.postMessage({
+            command: 'newChange',
+            changeId: change.contextValue,
+          });
+        });
+
+        if (change.branchType !== '@' && !change.isImmutable) {
+          addItem('Edit', 'codicon-edit', () => {
+            vscode.postMessage({
+              command: 'editChange',
+              changeId: change.contextValue,
+            });
+          });
+
+          addItem('Abandon', 'codicon-trash', () => {
+            vscode.postMessage({
+              command: 'abandonChange',
+              changeId: change.contextValue,
+            });
+          });
+        }
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu;
+
+        // Position menu inside viewport
+        const menuRect = menu.getBoundingClientRect();
+        let x = e.clientX;
+        let y = e.clientY;
+
+        if (x + menuRect.width > window.innerWidth) {
+          x = Math.max(4, window.innerWidth - menuRect.width - 4);
+        }
+        if (y + menuRect.height > window.innerHeight) {
+          y = Math.max(4, window.innerHeight - menuRect.height - 4);
+        }
+
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+      }
+
+      function showFileContextMenu(e, changeId, file) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+
+        function addItem(label, icon, onClick) {
+          const item = document.createElement('div');
+          item.className = 'context-menu-item';
+          item.innerHTML = `<i class="codicon ${icon}"></i><span>${label}</span>`;
+          item.onclick = (event) => {
+            event.stopPropagation();
+            hideContextMenu();
+            onClick();
+          };
+          menu.appendChild(item);
+        }
+
+        addItem('Open diff', 'codicon-compare-changes', () => {
+          vscode.postMessage({
+            command: 'openFileDiff',
+            changeId: changeId,
+            fileStatus: file,
+          });
+        });
+
+        addItem('Copy Relative Path', 'codicon-files', () => {
+          vscode.postMessage({
+            command: 'copyRelativePath',
+            file: file.file,
+          });
+        });
+
+        addItem('Copy Full Path', 'codicon-copy', () => {
+          vscode.postMessage({ command: 'copyPath', path: file.path });
+        });
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu;
+
+        const menuRect = menu.getBoundingClientRect();
+        let x = e.clientX;
+        let y = e.clientY;
+
+        if (x + menuRect.width > window.innerWidth) {
+          x = Math.max(4, window.innerWidth - menuRect.width - 4);
+        }
+        if (y + menuRect.height > window.innerHeight) {
+          y = Math.max(4, window.innerHeight - menuRect.height - 4);
+        }
+
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+      }
 
       window.addEventListener('message', (event) => {
         const message = event.data;
@@ -563,6 +757,10 @@
             });
           };
 
+          fileItem.addEventListener('contextmenu', (e) =>
+            showFileContextMenu(e, changeId, file),
+          );
+
           container.appendChild(fileItem);
         });
       }
@@ -862,6 +1060,10 @@
               selectedNodes: Array.from(selectedNodes),
             });
           };
+
+          node.addEventListener('contextmenu', (e) =>
+            showNodeContextMenu(e, change),
+          );
         });
 
         // Wait for next frame to ensure DOM is updated

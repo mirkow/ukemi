@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
+import type { ChangeWithDetails } from './jj/types';
 import path from 'path';
 import { getGraphConfig } from './config';
 import { toJJUri } from './uri';
@@ -38,6 +39,26 @@ type Message =
   | {
       command: 'copyRelativePath';
       file: string;
+    }
+  | {
+      command: 'copyText';
+      text: string;
+    }
+  | {
+      command: 'rebaseChange';
+      changeId: string;
+    }
+  | {
+      command: 'newChange';
+      changeId: string;
+    }
+  | {
+      command: 'abandonChange';
+      changeId: string;
+    }
+  | {
+      command: 'describeChange';
+      changeId: string;
     };
 
 export class ChangeNode {
@@ -220,6 +241,117 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
             await vscode.env.clipboard.writeText(message.file);
           }
           break;
+        case 'copyText':
+          if (message.text) {
+            await vscode.env.clipboard.writeText(message.text);
+          }
+          break;
+        case 'newChange':
+          try {
+            await this.repository.new(undefined, [message.changeId]);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to create new change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'abandonChange':
+          try {
+            const result = await vscode.window.showWarningMessage(
+              `Are you sure that you want to abandon ${message.changeId.slice(0, 8)}?`,
+              { modal: true },
+              'Abandon',
+            );
+            if (result !== 'Abandon') {
+              break;
+            }
+            await this.repository.abandon(message.changeId);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to abandon change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'describeChange':
+          try {
+            const showResult = await this.repository.show(message.changeId);
+            const input = await vscode.window.showInputBox({
+              prompt: 'Provide a description',
+              placeHolder: 'Change description here...',
+              value: showResult.change.description,
+            });
+            if (input === undefined) {
+              break;
+            }
+            await this.repository.describeRetryImmutable(
+              message.changeId,
+              input,
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'rebaseChange':
+          try {
+            const sourceChangeId = message.changeId;
+            const sourceShortId = sourceChangeId.substring(0, 8);
+
+            const changes: ChangeWithDetails[] = await this.repository
+              .getChanges(['all()'], { noIntegrate: true, limit: 200 })
+              .catch(() => this.repository.getChanges([], { noIntegrate: true }));
+
+            const candidateChanges = changes.filter(
+              (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
+            );
+
+            interface CommitQuickPickItem extends vscode.QuickPickItem {
+              changeId: string;
+            }
+
+            const items: CommitQuickPickItem[] = candidateChanges.map(
+              (change) => {
+                const shortChange = change.changeId.substring(0, 8);
+                const shortCommit = change.commitId.substring(0, 8);
+                const firstLine = change.description
+                  ? change.description.split('\n')[0]
+                  : '(no description)';
+                const bookmarkStr =
+                  change.bookmarks.length > 0
+                    ? ` [${change.bookmarks.join(', ')}]`
+                    : '';
+                return {
+                  label: `$(git-commit) ${firstLine}`,
+                  description: `${shortChange}${bookmarkStr} (${shortCommit})`,
+                  detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
+                  changeId: change.changeId,
+                };
+              },
+            );
+
+            const selection = await vscode.window.showQuickPick(items, {
+              title: `Rebase ${sourceShortId} onto...`,
+              placeHolder:
+                'Select destination commit (search description, commit ID, change ID, bookmarks)...',
+              matchOnDescription: true,
+              matchOnDetail: true,
+            });
+
+            if (!selection) {
+              break;
+            }
+
+            await this.repository.rebaseRetryImmutable({
+              sourceRev: sourceChangeId,
+              destRev: selection.changeId,
+            });
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
       }
     });
 
@@ -247,14 +379,14 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     const template = `
       concat(
         "JJLOGSTART|",
-        self.change_id().short(), "|",
+        self.change_id(), "|",
         self.change_id().shortest(), "|",
-        parents.map(|p| p.change_id().short()).join(" "), "|",
+        parents.map(|p| p.change_id()).join(" "), "|",
         author.email(), "|",
         author.timestamp().format("%Y-%m-%d %H:%M:%S"), "|",
         author.timestamp().ago(), "|",
         bookmarks.map(|b| b.name()).join(", "), "|",
-        self.commit_id().short(), "|",
+        self.commit_id(), "|",
         self.commit_id().shortest(), "|",
         if(current_working_copy, "@", if(self.working_copies(), "@", if(self.contained_in("visible_heads()"), "◆", "○"))), "|",
         if(self.empty(), "true", "false"), "|",

@@ -377,6 +377,11 @@
           "group": "1_item_copy@4"
         },
         {
+          "command": "jj.describe",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@0"
+        },
+        {
           "command": "jj.rebase",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@1"

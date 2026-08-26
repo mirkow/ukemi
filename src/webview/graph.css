@@ -465,3 +465,44 @@ body {
   align-items: center;
   gap: 6px;
 }
+
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #cccccc);
+  border: 1px solid var(--vscode-menu-border, #454545);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  padding: 4px 0;
+  min-width: 180px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  user-select: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background-color: var(--vscode-menu-selectionBackground, #04395e);
+  color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+.context-menu-item .codicon {
+  font-size: 14px;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background-color: var(--vscode-menu-separatorBackground, #454545);
+  margin: 4px 0;
+}
+
