@@ -47,6 +47,7 @@ type Message =
   | {
       command: 'rebaseChange';
       changeId: string;
+      withDescendants?: boolean;
     }
   | {
       command: 'newChange';
@@ -297,6 +298,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
           try {
             const sourceChangeId = message.changeId;
             const sourceShortId = sourceChangeId.substring(0, 8);
+            const withDescendants = message.withDescendants !== false;
 
             const changes: ChangeWithDetails[] = await this.repository
               .getChanges(['all()'], { noIntegrate: true, limit: 200 })
@@ -330,8 +332,12 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               },
             );
 
+            const title = withDescendants
+              ? `Rebase ${sourceShortId} (including descendants) onto...`
+              : `Rebase ${sourceShortId} (without descendants) onto...`;
+
             const selection = await vscode.window.showQuickPick(items, {
-              title: `Rebase ${sourceShortId} onto...`,
+              title,
               placeHolder:
                 'Select destination commit (search description, commit ID, change ID, bookmarks)...',
               matchOnDescription: true,
@@ -345,6 +351,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
             await this.repository.rebaseRetryImmutable({
               sourceRev: sourceChangeId,
               destRev: selection.changeId,
+              withDescendants,
             });
           } catch (error) {
             vscode.window.showErrorMessage(

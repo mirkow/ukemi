@@ -1477,73 +1477,92 @@ export async function activate(context: vscode.ExtensionContext) {
       ),
     );
 
+    const promptRebase = async (
+      item: GraphTreeItem | undefined,
+      withDescendants: boolean,
+    ) => {
+      const repository =
+        item?.getRepository() ?? workspaceSCM.repoSCMs[0]?.repository;
+      if (!repository) {
+        return;
+      }
+
+      const sourceChangeId = item ? item.getChangeId() : '@';
+      const sourceShortId = sourceChangeId.substring(0, 8);
+
+      try {
+        const changes: ChangeWithDetails[] = await repository
+          .getChanges(['all()'], { noIntegrate: true, limit: 200 })
+          .catch(() => repository.getChanges([], { noIntegrate: true }));
+
+        const candidateChanges = changes.filter(
+          (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
+        );
+
+        interface CommitQuickPickItem extends vscode.QuickPickItem {
+          changeId: string;
+        }
+
+        const items: CommitQuickPickItem[] = candidateChanges.map((change) => {
+          const shortChange = change.changeId.substring(0, 8);
+          const shortCommit = change.commitId.substring(0, 8);
+          const firstLine = change.description
+            ? change.description.split('\n')[0]
+            : '(no description)';
+          const bookmarkStr =
+            change.bookmarks.length > 0
+              ? ` [${change.bookmarks.join(', ')}]`
+              : '';
+          return {
+            label: `$(git-commit) ${firstLine}`,
+            description: `${shortChange}${bookmarkStr} (${shortCommit})`,
+            detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
+            changeId: change.changeId,
+          };
+        });
+
+        const title = withDescendants
+          ? `Rebase ${sourceShortId} (including descendants) onto...`
+          : `Rebase ${sourceShortId} (without descendants) onto...`;
+
+        const selection = await vscode.window.showQuickPick(items, {
+          title,
+          placeHolder:
+            'Select destination commit (search description, commit ID, change ID, bookmarks)...',
+          matchOnDescription: true,
+          matchOnDetail: true,
+        });
+
+        if (!selection) {
+          return;
+        }
+
+        await repository.rebaseRetryImmutable({
+          sourceRev: sourceChangeId,
+          destRev: selection.changeId,
+          withDescendants,
+        });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
+        );
+      }
+    };
+
     context.subscriptions.push(
       vscode.commands.registerCommand(
-        'jj.rebase',
+        'jj.rebaseIncludingDescendants',
         showLoading(async (item?: GraphTreeItem) => {
-          const repository =
-            item?.getRepository() ?? workspaceSCM.repoSCMs[0]?.repository;
-          if (!repository) {
-            return;
-          }
+          await promptRebase(item, true);
+        }),
+      ),
+    );
 
-          const sourceChangeId = item ? item.getChangeId() : '@';
-          const sourceShortId = sourceChangeId.substring(0, 8);
-
-          try {
-            const changes: ChangeWithDetails[] = await repository
-              .getChanges(['all()'], { noIntegrate: true, limit: 200 })
-              .catch(() => repository.getChanges([], { noIntegrate: true }));
-
-            const candidateChanges = changes.filter(
-              (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
-            );
-
-            interface CommitQuickPickItem extends vscode.QuickPickItem {
-              changeId: string;
-            }
-
-            const items: CommitQuickPickItem[] = candidateChanges.map(
-              (change) => {
-                const shortChange = change.changeId.substring(0, 8);
-                const shortCommit = change.commitId.substring(0, 8);
-                const firstLine = change.description
-                  ? change.description.split('\n')[0]
-                  : '(no description)';
-                const bookmarkStr =
-                  change.bookmarks.length > 0
-                    ? ` [${change.bookmarks.join(', ')}]`
-                    : '';
-                return {
-                  label: `$(git-commit) ${firstLine}`,
-                  description: `${shortChange}${bookmarkStr} (${shortCommit})`,
-                  detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
-                  changeId: change.changeId,
-                };
-              },
-            );
-
-            const selection = await vscode.window.showQuickPick(items, {
-              title: `Rebase ${sourceShortId} onto...`,
-              placeHolder:
-                'Select destination commit (search description, commit ID, change ID, bookmarks)...',
-              matchOnDescription: true,
-              matchOnDetail: true,
-            });
-
-            if (!selection) {
-              return;
-            }
-
-            await repository.rebaseRetryImmutable({
-              sourceRev: sourceChangeId,
-              destRev: selection.changeId,
-            });
-          } catch (error) {
-            vscode.window.showErrorMessage(
-              `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
-            );
-          }
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.rebaseWithoutDescendants',
+        showLoading(async (item?: GraphTreeItem) => {
+          await promptRebase(item, false);
         }),
       ),
     );

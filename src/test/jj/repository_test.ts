@@ -175,7 +175,7 @@ suite('JJRepository', () => {
   });
 
   suite('rebase', () => {
-    test('rebases a revision onto a destination revision', async () => {
+    test('rebases a revision including descendants onto a destination revision', async () => {
       const repo = new JJRepository(
         getRepoPath(),
         getJJPath(),
@@ -183,35 +183,115 @@ suite('JJRepository', () => {
         [],
       );
 
-      const fileA = path.join(suiteDir, 'rebase_a.txt');
+      const fileA = path.join(suiteDir, 'rebase_inc_a.txt');
       await fs.writeFile(fileA, 'A content');
       await repo.describe('@', 'Commit A');
       const showA = await repo.show('@');
       const changeA = showA.change.changeId;
       await repo.new();
 
-      const fileB = path.join(suiteDir, 'rebase_b.txt');
+      const fileB = path.join(suiteDir, 'rebase_inc_b.txt');
       await fs.writeFile(fileB, 'B content');
       await repo.describe('@', 'Commit B');
+      const showB = await repo.show('@');
+      const changeB = showB.change.changeId;
       await repo.new();
 
-      const fileC = path.join(suiteDir, 'rebase_c.txt');
+      const fileC = path.join(suiteDir, 'rebase_inc_c.txt');
       await fs.writeFile(fileC, 'C content');
       await repo.describe('@', 'Commit C');
-      const showCBefore = await repo.show('@');
-      const changeC = showCBefore.change.changeId;
+      const showC = await repo.show('@');
+      const changeC = showC.change.changeId;
       await repo.new();
 
-      // Rebase C onto A
+      // Create destination commit D off A
+      await repo.new(undefined, [changeA]);
+      const fileD = path.join(suiteDir, 'rebase_inc_d.txt');
+      await fs.writeFile(fileD, 'D content');
+      await repo.describe('@', 'Commit D');
+      const showD = await repo.show('@');
+      const changeD = showD.change.changeId;
+      await repo.new();
+
+      // Rebase B including descendants onto D
       await repo.rebase({
-        sourceRev: changeC,
-        destRev: changeA,
+        sourceRev: changeB,
+        destRev: changeD,
+        withDescendants: true,
       });
 
-      const showC = await repo.show(changeC);
+      const showBAfter = await repo.show(changeB);
       assert.ok(
-        showC.change.parentChangeIds.includes(changeA),
-        'Expected Commit C parent to be Commit A after rebase',
+        showBAfter.change.parentChangeIds.includes(changeD),
+        'Expected Commit B parent to be Commit D after rebase',
+      );
+
+      const showCAfter = await repo.show(changeC);
+      assert.ok(
+        showCAfter.change.parentChangeIds.includes(changeB),
+        'Expected Commit C parent to still be Commit B after rebase with descendants',
+      );
+      assert.ok(
+        !showCAfter.change.parentChangeIds.includes(changeA),
+        'Expected Commit C parent not to be Commit A after rebase with descendants',
+      );
+    });
+
+    test('rebases a revision without descendants onto a destination revision', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const fileA = path.join(suiteDir, 'rebase_no_a.txt');
+      await fs.writeFile(fileA, 'A content');
+      await repo.describe('@', 'Commit A');
+      const showA = await repo.show('@');
+      const changeA = showA.change.changeId;
+      await repo.new();
+
+      const fileB = path.join(suiteDir, 'rebase_no_b.txt');
+      await fs.writeFile(fileB, 'B content');
+      await repo.describe('@', 'Commit B');
+      const showB = await repo.show('@');
+      const changeB = showB.change.changeId;
+      await repo.new();
+
+      const fileC = path.join(suiteDir, 'rebase_no_c.txt');
+      await fs.writeFile(fileC, 'C content');
+      await repo.describe('@', 'Commit C');
+      const showC = await repo.show('@');
+      const changeC = showC.change.changeId;
+      await repo.new();
+
+      // Create destination commit D off A
+      await repo.new(undefined, [changeA]);
+      const fileD = path.join(suiteDir, 'rebase_no_d.txt');
+      await fs.writeFile(fileD, 'D content');
+      await repo.describe('@', 'Commit D');
+      const showD = await repo.show('@');
+      const changeD = showD.change.changeId;
+      await repo.new();
+
+      // Rebase B without descendants onto D
+      await repo.rebase({
+        sourceRev: changeB,
+        destRev: changeD,
+        withDescendants: false,
+      });
+
+      const showBAfter = await repo.show(changeB);
+      assert.ok(
+        showBAfter.change.parentChangeIds.includes(changeD),
+        'Expected Commit B parent to be Commit D after rebase',
+      );
+
+      const showCAfter = await repo.show(changeC);
+      assert.ok(
+        showCAfter.change.parentChangeIds.includes(changeA),
+        'Expected Commit C to be re-parented onto Commit A after single revision rebase',
       );
     });
   });

@@ -109,11 +109,20 @@
           });
         });
 
-        // Rebase action
-        addItem('Rebase...', 'codicon-git-branch', () => {
+        // Rebase actions
+        addItem('Rebase including descendants...', 'codicon-git-branch', () => {
           vscode.postMessage({
             command: 'rebaseChange',
             changeId: change.contextValue,
+            withDescendants: true,
+          });
+        });
+
+        addItem('Rebase without descendants...', 'codicon-git-branch', () => {
+          vscode.postMessage({
+            command: 'rebaseChange',
+            changeId: change.contextValue,
+            withDescendants: false,
           });
         });
 

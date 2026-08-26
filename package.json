@@ -237,8 +237,14 @@
         "category": "Jujutsu"
       },
       {
-        "command": "jj.rebase",
-        "title": "Rebase...",
+        "command": "jj.rebaseIncludingDescendants",
+        "title": "Rebase including descendants...",
+        "category": "Jujutsu",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "jj.rebaseWithoutDescendants",
+        "title": "Rebase without descendants...",
         "category": "Jujutsu",
         "icon": "$(git-branch)"
       },
@@ -393,24 +399,29 @@
           "group": "2_item_action@0"
         },
         {
-          "command": "jj.rebase",
+          "command": "jj.rebaseIncludingDescendants",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@1"
         },
         {
-          "command": "jj.edit",
+          "command": "jj.rebaseWithoutDescendants",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@2"
         },
         {
-          "command": "jj.update",
+          "command": "jj.edit",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@3"
         },
         {
+          "command": "jj.update",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@4"
+        },
+        {
           "command": "jj.abandon",
           "when": "view == jjGraph && viewItem == mutable",
-          "group": "2_item_action@4"
+          "group": "2_item_action@5"
         },
         {
           "command": "jj.edit",

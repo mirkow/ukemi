@@ -1006,12 +1006,14 @@ export class JJRepository {
   async rebaseRetryImmutable({
     sourceRev,
     destRev,
+    withDescendants = true,
   }: {
     sourceRev: string;
     destRev: string;
+    withDescendants?: boolean;
   }) {
     try {
-      return await this.rebase({ sourceRev, destRev });
+      return await this.rebase({ sourceRev, destRev, withDescendants });
     } catch (e) {
       if (e instanceof ImmutableError) {
         const choice = await vscode.window.showQuickPick(['Continue'], {
@@ -1023,6 +1025,7 @@ export class JJRepository {
         return await this.rebase({
           sourceRev,
           destRev,
+          withDescendants,
           ignoreImmutable: true,
         });
       }
@@ -1033,17 +1036,20 @@ export class JJRepository {
   async rebase({
     sourceRev,
     destRev,
+    withDescendants = true,
     ignoreImmutable = false,
   }: {
     sourceRev: string;
     destRev: string;
+    withDescendants?: boolean;
     ignoreImmutable?: boolean;
   }) {
+    const flag = withDescendants ? '-s' : '-r';
     return await handleJJCommand(
       this.spawnJJ(
         [
           'rebase',
-          '-r',
+          flag,
           sourceRev,
           '-d',
           destRev,
