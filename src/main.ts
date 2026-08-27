@@ -27,7 +27,7 @@ import {
   GraphTreeItem,
   GraphTreeView,
 } from './graph_tree_view';
-import { getConfig } from './config';
+import { getConfig, getMainBookmark } from './config';
 import { getLogger } from './logger';
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -1569,6 +1569,49 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
       vscode.commands.registerCommand(
+        'jj.fetchAndSyncToMain',
+        showLoading(async (item?: GraphTreeItem) => {
+          const repository =
+            item?.getRepository() ?? workspaceSCM.repoSCMs[0]?.repository;
+          if (!repository) {
+            return;
+          }
+
+          const sourceChangeId = item ? item.getChangeId() : '@';
+          const sourceShortId = sourceChangeId.slice(0, 8);
+
+          try {
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Fetching and syncing ${sourceShortId} to main...`,
+                cancellable: false,
+              },
+              async () => {
+                await repository.gitFetch();
+                const mainBookmark = getMainBookmark(
+                  repository.repositoryRoot
+                    ? vscode.Uri.file(repository.repositoryRoot)
+                    : undefined,
+                );
+                await repository.rebaseRetryImmutable({
+                  sourceRev: sourceChangeId,
+                  destRev: mainBookmark,
+                  withDescendants: true,
+                });
+              },
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
         'jj.update',
         showLoading(async (item: GraphTreeItem) => {
           try {
@@ -1601,8 +1644,16 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(
         'jj.abandon',
         showLoading(async (item: GraphTreeItem) => {
+          const shortId = item.getChangeId().slice(0, 8);
+          const rawDesc =
+            item.getDescription() || item.getChange()?.description || '';
+          const desc = rawDesc
+            .replace(/^\(empty\)\s*/, '')
+            .split('\n')[0]
+            .trim();
+          const descText = desc ? ` "${desc}"` : '';
           const result = await vscode.window.showWarningMessage(
-            `Are you sure that you want to abandon ${item.getChangeId().slice(0, 8)}?`,
+            `Are you sure that you want to abandon ${shortId}${descText}?`,
             { modal: true },
             'Abandon',
           );

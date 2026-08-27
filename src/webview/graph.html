@@ -126,6 +126,13 @@
           });
         });
 
+        addItem('Fetch and sync to main', 'codicon-sync', () => {
+          vscode.postMessage({
+            command: 'fetchAndSyncToMain',
+            changeId: change.contextValue,
+          });
+        });
+
         addItem('New commit on this', 'codicon-plus', () => {
           vscode.postMessage({
             command: 'newChange',
@@ -145,6 +152,7 @@
             vscode.postMessage({
               command: 'abandonChange',
               changeId: change.contextValue,
+              description: change.description,
             });
           });
         }

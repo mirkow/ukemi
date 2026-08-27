@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
 import type { ChangeWithDetails } from './jj/types';
 import path from 'path';
-import { getGraphConfig } from './config';
+import { getGraphConfig, getMainBookmark } from './config';
 import { toJJUri } from './uri';
 
 type Message =
@@ -55,6 +55,11 @@ type Message =
     }
   | {
       command: 'abandonChange';
+      changeId: string;
+      description?: string;
+    }
+  | {
+      command: 'fetchAndSyncToMain';
       changeId: string;
     }
   | {
@@ -259,8 +264,21 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
           break;
         case 'abandonChange':
           try {
+            const shortId = message.changeId.slice(0, 8);
+            let desc = message.description
+              ? message.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+              : '';
+            if (!desc) {
+              const showResult = await this.repository
+                .show(message.changeId)
+                .catch(() => undefined);
+              desc = showResult?.change.description
+                ? showResult.change.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+                : '';
+            }
+            const descText = desc ? ` "${desc}"` : '';
             const result = await vscode.window.showWarningMessage(
-              `Are you sure that you want to abandon ${message.changeId.slice(0, 8)}?`,
+              `Are you sure that you want to abandon ${shortId}${descText}?`,
               { modal: true },
               'Abandon',
             );
@@ -271,6 +289,35 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to abandon change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'fetchAndSyncToMain':
+          try {
+            const shortId = message.changeId.slice(0, 8);
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Fetching and syncing ${shortId} to main...`,
+                cancellable: false,
+              },
+              async () => {
+                await this.repository.gitFetch();
+                const mainBookmark = getMainBookmark(
+                  this.repository.repositoryRoot
+                    ? vscode.Uri.file(this.repository.repositoryRoot)
+                    : undefined,
+                );
+                await this.repository.rebaseRetryImmutable({
+                  sourceRev: message.changeId,
+                  destRev: mainBookmark,
+                  withDescendants: true,
+                });
+              },
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
           break;

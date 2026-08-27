@@ -249,6 +249,12 @@
         "icon": "$(git-branch)"
       },
       {
+        "command": "jj.fetchAndSyncToMain",
+        "title": "Fetch and sync to main",
+        "category": "Jujutsu",
+        "icon": "$(sync)"
+      },
+      {
         "command": "jj.edit",
         "title": "Edit",
         "category": "Jujutsu",
@@ -409,19 +415,24 @@
           "group": "2_item_action@2"
         },
         {
-          "command": "jj.edit",
+          "command": "jj.fetchAndSyncToMain",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@3"
         },
         {
-          "command": "jj.update",
+          "command": "jj.edit",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@4"
         },
         {
+          "command": "jj.update",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@5"
+        },
+        {
           "command": "jj.abandon",
           "when": "view == jjGraph && viewItem == mutable",
-          "group": "2_item_action@5"
+          "group": "2_item_action@6"
         },
         {
           "command": "jj.edit",
@@ -640,6 +651,12 @@
           "type": "string",
           "default": "",
           "description": "Path to the jj executable. If not set, your PATH and common locations will be searched for a jj executable.",
+          "scope": "resource"
+        },
+        "ukemi.mainBookmark": {
+          "type": "string",
+          "default": "main@origin",
+          "markdownDescription": "The name or revset of the main bookmark to sync to when running 'Fetch and sync to main' (e.g. `main@origin`, `master@origin`, `trunk()`).",
           "scope": "resource"
         },
         "ukemi.graph.viewLayout": {
