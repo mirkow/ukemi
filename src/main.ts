@@ -116,6 +116,7 @@ export async function activate(context: vscode.ExtensionContext) {
       context.extensionUri,
       initialSelectedRepo,
       context,
+      workspaceSCM,
     );
 
     const graphTreeDataProvider = new GraphTreeDataProvider(
@@ -367,7 +368,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.new',
-        async (sourceControl: vscode.SourceControl) => {
+        showLoading(async (sourceControl: vscode.SourceControl) => {
           try {
             const repository =
               workspaceSCM.getRepositoryFromSourceControl(sourceControl);
@@ -382,7 +383,7 @@ export async function activate(context: vscode.ExtensionContext) {
               `Failed to create change${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
-        },
+        }),
       ),
     );
 
@@ -645,52 +646,54 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.describe',
-        async (
-          arg?:
-            | vscode.SourceControlResourceGroup
-            | GraphTreeItem
-            | { changeId: string },
-        ) => {
-          const repository =
-            arg instanceof GraphTreeItem
-              ? arg.getRepository()
-              : arg && 'id' in arg
-                ? workspaceSCM.getRepositoryFromResourceGroup(arg)
-                : workspaceSCM.repoSCMs[0]?.repository;
+        showLoading(
+          async (
+            arg?:
+              | vscode.SourceControlResourceGroup
+              | GraphTreeItem
+              | { changeId: string },
+          ) => {
+            const repository =
+              arg instanceof GraphTreeItem
+                ? arg.getRepository()
+                : arg && 'id' in arg
+                  ? workspaceSCM.getRepositoryFromResourceGroup(arg)
+                  : workspaceSCM.repoSCMs[0]?.repository;
 
-          if (!repository) {
-            throw new Error('Repository not found');
-          }
+            if (!repository) {
+              throw new Error('Repository not found');
+            }
 
-          const changeId =
-            arg instanceof GraphTreeItem
-              ? arg.getChangeId()
-              : arg && 'id' in arg
-                ? arg.id
-                : arg && 'changeId' in arg
-                  ? arg.changeId
-                  : '@';
+            const changeId =
+              arg instanceof GraphTreeItem
+                ? arg.getChangeId()
+                : arg && 'id' in arg
+                  ? arg.id
+                  : arg && 'changeId' in arg
+                    ? arg.changeId
+                    : '@';
 
-          const showResult = await repository.show(changeId);
+            const showResult = await repository.show(changeId);
 
-          const message = await vscode.window.showInputBox({
-            prompt: 'Provide a description',
-            placeHolder: 'Change description here...',
-            value: showResult.change.description,
-          });
+            const message = await vscode.window.showInputBox({
+              prompt: 'Provide a description',
+              placeHolder: 'Change description here...',
+              value: showResult.change.description,
+            });
 
-          if (message === undefined) {
-            return;
-          }
+            if (message === undefined) {
+              return;
+            }
 
-          try {
-            await repository.describeRetryImmutable(changeId, message);
-          } catch (error) {
-            vscode.window.showErrorMessage(
-              `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
-            );
-          }
-        },
+            try {
+              await repository.describeRetryImmutable(changeId, message);
+            } catch (error) {
+              vscode.window.showErrorMessage(
+                `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
+              );
+            }
+          },
+        ),
       ),
     );
 
@@ -839,20 +842,22 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.editResourceGroup',
-        async (resourceGroup: vscode.SourceControlResourceGroup) => {
-          try {
-            const repository =
-              workspaceSCM.getRepositoryFromResourceGroup(resourceGroup);
-            if (!repository) {
-              throw new Error('Repository not found');
+        showLoading(
+          async (resourceGroup: vscode.SourceControlResourceGroup) => {
+            try {
+              const repository =
+                workspaceSCM.getRepositoryFromResourceGroup(resourceGroup);
+              if (!repository) {
+                throw new Error('Repository not found');
+              }
+              await repository.editRetryImmutable(resourceGroup.id);
+            } catch (error) {
+              vscode.window.showErrorMessage(
+                `Failed to switch to change${error instanceof Error ? `: ${error.message}` : ''}`,
+              );
             }
-            await repository.editRetryImmutable(resourceGroup.id);
-          } catch (error) {
-            vscode.window.showErrorMessage(
-              `Failed to switch to change${error instanceof Error ? `: ${error.message}` : ''}`,
-            );
-          }
-        },
+          },
+        ),
       ),
     );
 
@@ -925,21 +930,24 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-      vscode.commands.registerCommand('jj.newGraphWebview', async () => {
-        const selectedNodes = Array.from(graphWebview.selectedNodes);
-        if (selectedNodes.length < 1) {
-          return;
-        }
-        const revs = selectedNodes;
+      vscode.commands.registerCommand(
+        'jj.newGraphWebview',
+        showLoading(async () => {
+          const selectedNodes = Array.from(graphWebview.selectedNodes);
+          if (selectedNodes.length < 1) {
+            return;
+          }
+          const revs = selectedNodes;
 
-        try {
-          await graphWebview.repository.new(undefined, revs);
-        } catch (error) {
-          vscode.window.showErrorMessage(
-            `Failed to create change${error instanceof Error ? `: ${error.message}` : ''}`,
-          );
-        }
-      }),
+          try {
+            await graphWebview.repository.new(undefined, revs);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to create change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
     );
 
     context.subscriptions.push(
@@ -1013,7 +1021,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.operationUndo',
-        async (item: unknown) => {
+        showLoading(async (item: unknown) => {
           try {
             if (!(item instanceof OperationTreeItem)) {
               throw new Error('OperationTreeItem expected');
@@ -1030,14 +1038,14 @@ export async function activate(context: vscode.ExtensionContext) {
               `Failed to undo operation${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
-        },
+        }),
       ),
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.operationRestore',
-        async (item: unknown) => {
+        showLoading(async (item: unknown) => {
           try {
             if (!(item instanceof OperationTreeItem)) {
               throw new Error('OperationTreeItem expected');
@@ -1054,7 +1062,7 @@ export async function activate(context: vscode.ExtensionContext) {
               `Failed to restore operation${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
-        },
+        }),
       ),
     );
 
@@ -1064,9 +1072,12 @@ export async function activate(context: vscode.ExtensionContext) {
           statusBarItem.text = '$(sync~spin)';
           statusBarItem.tooltip = 'Fetching...';
           try {
-            await workspaceSCM
-              .getRepositoryFromUri(lastOpenedFileUri)
-              ?.gitFetch();
+            const repository =
+              workspaceSCM.getRepositoryFromUri(lastOpenedFileUri);
+            await repository?.gitFetch();
+            if (repository) {
+              await workspaceSCM.checkForUpdates(repository.repositoryRoot);
+            }
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to fetch from remote${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -1235,6 +1246,7 @@ export async function activate(context: vscode.ExtensionContext) {
               textEditor,
             );
           }
+          await workspaceSCM.checkForUpdates(repository.repositoryRoot);
         } catch (error) {
           vscode.window.showErrorMessage(
             `Failed to squash selection${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -1703,9 +1715,7 @@ export async function activate(context: vscode.ExtensionContext) {
             | vscode.Uri,
         ) => {
           const uri =
-            resource instanceof vscode.Uri
-              ? resource
-              : resource?.resourceUri;
+            resource instanceof vscode.Uri ? resource : resource?.resourceUri;
           if (uri) {
             await vscode.env.clipboard.writeText(uri.fsPath);
           }
@@ -1723,9 +1733,7 @@ export async function activate(context: vscode.ExtensionContext) {
             | vscode.Uri,
         ) => {
           const uri =
-            resource instanceof vscode.Uri
-              ? resource
-              : resource?.resourceUri;
+            resource instanceof vscode.Uri ? resource : resource?.resourceUri;
           if (uri) {
             await vscode.env.clipboard.writeText(
               vscode.workspace.asRelativePath(uri.fsPath),
@@ -1753,9 +1761,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // Snapshot changes
-    await Promise.all(
-      workspaceSCM.repoSCMs.map((repoSCM) => repoSCM.checkForUpdates()),
-    );
+    await workspaceSCM.checkForUpdates();
   }
 
   context.subscriptions.push(
@@ -1911,6 +1917,23 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  function showLoading<T extends unknown[]>(
+    callback: (...args: T) => Promise<unknown>,
+    ...initialArgs: Partial<T>
+  ) {
+    return (...args: T) =>
+      vscode.window.withProgress(
+        { location: vscode.ProgressLocation.SourceControl },
+        async () => {
+          try {
+            await callback(...(args.length ? args : (initialArgs as T)));
+          } finally {
+            await workspaceSCM.checkForUpdates();
+          }
+        },
+      );
+  }
+
   void scheduleNextPoll(); // Start the first poll.
 
   context.subscriptions.push(
@@ -1919,19 +1942,6 @@ export async function activate(context: vscode.ExtensionContext) {
       clearTimeout(pollTimeoutId);
     }),
   );
-}
-
-function showLoading<T extends unknown[]>(
-  callback: (...args: T) => Promise<unknown>,
-  ...initialArgs: Partial<T>
-) {
-  return (...args: T) =>
-    vscode.window.withProgress(
-      { location: vscode.ProgressLocation.SourceControl },
-      async () => {
-        await callback(...(args.length ? args : (initialArgs as T)));
-      },
-    );
 }
 
 export function deactivate() {}

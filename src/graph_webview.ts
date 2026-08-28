@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
 import type { ChangeWithDetails } from './jj/types';
+import type { WorkspaceSourceControlManager } from './scm/workspace';
 import path from 'path';
 import { getGraphConfig, getMainBookmark } from './config';
 import { toJJUri } from './uri';
@@ -101,6 +102,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     repo: JJRepository,
     private readonly context: vscode.ExtensionContext,
+    private readonly workspaceSCM?: WorkspaceSourceControlManager,
   ) {
     this.repository = repo;
 
@@ -159,6 +161,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               async () => {
                 await this.repository.editRetryImmutable(message.changeId);
               },
+            );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
             );
           } catch (error: unknown) {
             vscode.window.showErrorMessage(
@@ -256,6 +261,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         case 'newChange':
           try {
             await this.repository.new(undefined, [message.changeId]);
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to create new change${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -266,14 +274,20 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
           try {
             const shortId = message.changeId.slice(0, 8);
             let desc = message.description
-              ? message.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+              ? message.description
+                  .replace(/^\(empty\)\s*/, '')
+                  .split('\n')[0]
+                  .trim()
               : '';
             if (!desc) {
               const showResult = await this.repository
                 .show(message.changeId)
                 .catch(() => undefined);
               desc = showResult?.change.description
-                ? showResult.change.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+                ? showResult.change.description
+                    .replace(/^\(empty\)\s*/, '')
+                    .split('\n')[0]
+                    .trim()
                 : '';
             }
             const descText = desc ? ` "${desc}"` : '';
@@ -286,6 +300,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               break;
             }
             await this.repository.abandon(message.changeId);
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to abandon change${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -315,6 +332,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
                 });
               },
             );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -336,6 +356,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               message.changeId,
               input,
             );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -350,7 +373,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
 
             const changes: ChangeWithDetails[] = await this.repository
               .getChanges(['all()'], { noIntegrate: true, limit: 200 })
-              .catch(() => this.repository.getChanges([], { noIntegrate: true }));
+              .catch(() =>
+                this.repository.getChanges([], { noIntegrate: true }),
+              );
 
             const candidateChanges = changes.filter(
               (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
@@ -401,6 +426,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               destRev: selection.changeId,
               withDescendants,
             });
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,

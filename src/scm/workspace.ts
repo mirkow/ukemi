@@ -166,6 +166,21 @@ export class WorkspaceSourceControlManager {
     return isAnyRepoChanged;
   }
 
+  async checkForUpdates(repositoryRoot?: string): Promise<void> {
+    if (repositoryRoot) {
+      const repoSCM = this.repoSCMs.find(
+        (repo) => repo.repositoryRoot === repositoryRoot,
+      );
+      if (repoSCM) {
+        await repoSCM.checkForUpdates();
+      }
+    } else {
+      await Promise.all(
+        this.repoSCMs.map((repoSCM) => repoSCM.checkForUpdates()),
+      );
+    }
+  }
+
   getRepositoryFromUri(uri: vscode.Uri) {
     return this.repoSCMs.find((repo) => {
       return !path.relative(repo.repositoryRoot, uri.fsPath).startsWith('..');
