@@ -318,6 +318,34 @@ suite('JJRepository', () => {
       assert.strictEqual(afterShow.change.description, beforeDesc);
     });
   });
+
+  suite('bookmarks', () => {
+    test('sets and lists bookmarks on a change', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const show = await repo.show('@');
+      const changeId = show.change.changeId;
+      const testBookmark = `test-bm-${Date.now()}`;
+
+      await repo.setBookmark(testBookmark, changeId);
+      const bookmarks = await repo.listBookmarks();
+      assert.ok(
+        bookmarks.includes(testBookmark),
+        `Expected ${testBookmark} to be in listed bookmarks: ${bookmarks.join(', ')}`,
+      );
+
+      const showAfter = await repo.show(changeId);
+      assert.ok(
+        showAfter.change.bookmarks.includes(testBookmark),
+        `Expected commit bookmarks to include ${testBookmark}`,
+      );
+    });
+  });
 });
 
 suite('parseRenamePaths', () => {

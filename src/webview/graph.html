@@ -81,7 +81,10 @@
         }
 
         addItem('Copy Full Change ID', 'codicon-copy', () => {
-          vscode.postMessage({ command: 'copyText', text: change.contextValue });
+          vscode.postMessage({
+            command: 'copyText',
+            text: change.contextValue,
+          });
         });
 
         addItem('Copy Short Change ID', 'codicon-copy', () => {
@@ -108,6 +111,28 @@
             changeId: change.contextValue,
           });
         });
+
+        // Bookmark actions
+        addItem('Set bookmark...', 'codicon-bookmark', () => {
+          vscode.postMessage({
+            command: 'setBookmark',
+            changeId: change.contextValue,
+          });
+        });
+
+        if (change.bookmarks && change.bookmarks.length > 0) {
+          const pushLabel =
+            change.bookmarks.length === 1
+              ? `Push bookmark (${change.bookmarks[0]})...`
+              : 'Push bookmark...';
+          addItem(pushLabel, 'codicon-cloud-upload', () => {
+            vscode.postMessage({
+              command: 'pushBookmark',
+              changeId: change.contextValue,
+              bookmarks: change.bookmarks,
+            });
+          });
+        }
 
         // Rebase actions
         addItem('Rebase including descendants...', 'codicon-git-branch', () => {
@@ -452,7 +477,8 @@
             const parentNode = nodeMap.get(parentId);
             if (parentNode) {
               const parentRect = parentNode.getBoundingClientRect();
-              const parentX = parentRect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
+              const parentX =
+                parentRect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
               const parentY =
                 parentRect.top - svgRect.top + parentRect.height / 2;
 
@@ -778,7 +804,10 @@
           copyRelBtn.innerHTML = '<i class="codicon codicon-files"></i>';
           copyRelBtn.onclick = (e) => {
             e.stopPropagation();
-            vscode.postMessage({ command: 'copyRelativePath', file: file.file });
+            vscode.postMessage({
+              command: 'copyRelativePath',
+              file: file.file,
+            });
           };
           actionsDiv.appendChild(copyRelBtn);
 

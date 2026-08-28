@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.14
+
+- Add context menu action to set or move bookmarks (`jj bookmark set`) with QuickPick selection of existing bookmarks or creation of new bookmark names.
+- Add context menu action to push bookmark/branch to remote (`jj git push --bookmark <name>`) when a commit has associated bookmarks.
+- Actively trigger change detection and graph/SCM refresh immediately upon completion of mutating commands.
+
 ## 0.0.13
 
 - Add collapsible list of changed files to both Commits tree view and Source Control Graph webview to inspect diffs and copy paths without checking out.
@@ -15,7 +21,7 @@
 - Add JJ Undo button to the title bar of the Source Control Graph view.
 - Display italicized relative commit age in Commits tree view.
 - Fix diff viewer for added and deleted files in JJ file system provider.
-- Fix copying relative path on non-working copy revision. 
+- Fix copying relative path on non-working copy revision.
 
 ## 0.0.12
 

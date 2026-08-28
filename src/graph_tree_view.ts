@@ -164,10 +164,11 @@ export class GraphTreeItem extends TreeItem {
     } else if (italicTime) {
       this.description = italicTime;
     }
+    const hasBookmark = this.change.bookmarks.length > 0;
     if (this.change.isImmutable) {
-      this.contextValue = 'immutable';
+      this.contextValue = hasBookmark ? 'immutable,hasBookmark' : 'immutable';
     } else {
-      this.contextValue = 'mutable';
+      this.contextValue = hasBookmark ? 'mutable,hasBookmark' : 'mutable';
     }
     this.tooltip = getChangeTooltip(change);
   }
@@ -263,8 +264,7 @@ export class CommitFilesGroupTreeItem extends TreeItem {
       return false;
     }
     return (
-      this.id === other.id &&
-      this.collapsibleState === other.collapsibleState
+      this.id === other.id && this.collapsibleState === other.collapsibleState
     );
   }
 }
@@ -358,7 +358,9 @@ export class CommitFileTreeItem extends TreeItem {
     const originalRev = change.parentChangeIds?.[0] || `${change.changeId}-`;
     const fromPath = fileStatus.renamedFrom || fileStatus.file;
     const leftUri = toJJUri(
-      Uri.file(path.join(this.dataProvider.getSelectedRepo().repositoryRoot, fromPath)),
+      Uri.file(
+        path.join(this.dataProvider.getSelectedRepo().repositoryRoot, fromPath),
+      ),
       { diffOriginalRev: originalRev },
     );
     const rightUri =
@@ -405,15 +407,12 @@ export class CommitFileTreeItem extends TreeItem {
   }
 }
 
-export class GraphTreeDataProvider
-  implements TreeDataProvider<GraphTreeElement>
-{
+export class GraphTreeDataProvider implements TreeDataProvider<GraphTreeElement> {
   private readonly onDidChangeTreeDataInternal: EventEmitter<
     GraphTreeElement | undefined | null | void
   > = new EventEmitter();
-  onDidChangeTreeData: Event<
-    GraphTreeElement | undefined | null | void
-  > = this.onDidChangeTreeDataInternal.event;
+  onDidChangeTreeData: Event<GraphTreeElement | undefined | null | void> =
+    this.onDidChangeTreeDataInternal.event;
 
   private filterQuery = '';
   private items: GraphTreeItem[] = [];
@@ -429,10 +428,7 @@ export class GraphTreeDataProvider
     return this.filterQuery;
   }
 
-  async setFilter(
-    filter: string,
-    treeView?: TreeView<GraphTreeElement>,
-  ) {
+  async setFilter(filter: string, treeView?: TreeView<GraphTreeElement>) {
     this.filterQuery = filter;
     await this.refresh(treeView);
   }
@@ -441,9 +437,7 @@ export class GraphTreeDataProvider
     return element;
   }
 
-  async getChildren(
-    element?: GraphTreeElement,
-  ): Promise<GraphTreeElement[]> {
+  async getChildren(element?: GraphTreeElement): Promise<GraphTreeElement[]> {
     if (!this.isLoaded) {
       await this.loadChanges();
     }
@@ -485,10 +479,9 @@ export class GraphTreeDataProvider
       }
 
       try {
-        const showResult = await this.selectedRepository.show(
-          changeId,
-          { noIntegrate: true },
-        );
+        const showResult = await this.selectedRepository.show(changeId, {
+          noIntegrate: true,
+        });
         const fileItems = showResult.fileStatuses.map(
           (fileStatus) =>
             new CommitFileTreeItem(
@@ -550,7 +543,9 @@ export class GraphTreeDataProvider
                 (show) =>
                   show.change.description.toLowerCase().includes(lowerFilter) ||
                   show.change.author.name.toLowerCase().includes(lowerFilter) ||
-                  show.change.author.email.toLowerCase().includes(lowerFilter) ||
+                  show.change.author.email
+                    .toLowerCase()
+                    .includes(lowerFilter) ||
                   show.change.changeId.toLowerCase().includes(lowerFilter) ||
                   show.change.bookmarks.some((b) =>
                     b.toLowerCase().includes(lowerFilter),
@@ -606,9 +601,7 @@ export class GraphTreeDataProvider
     return this.loadingPromise;
   }
 
-  async refresh(
-    treeView?: TreeView<GraphTreeElement>,
-  ) {
+  async refresh(treeView?: TreeView<GraphTreeElement>) {
     const prev = [...this.items];
 
     this.filesCache.clear();
@@ -643,9 +636,7 @@ export class GraphTreeDataProvider
     return this.selectedRepository;
   }
 
-  getParent(
-    element: GraphTreeElement,
-  ): ProviderResult<GraphTreeElement> {
+  getParent(element: GraphTreeElement): ProviderResult<GraphTreeElement> {
     if (element instanceof CommitFileTreeItem) {
       return element.parentGroup;
     }
@@ -657,14 +648,14 @@ export class GraphTreeDataProvider
       if (parentChangeIds.length === 0) {
         return undefined;
       }
-      return this.items.find((item) => item.getChangeId() === parentChangeIds[0]);
+      return this.items.find(
+        (item) => item.getChangeId() === parentChangeIds[0],
+      );
     }
     return undefined;
   }
 
-  async updateSelection(
-    treeView: TreeView<GraphTreeElement>,
-  ) {
+  async updateSelection(treeView: TreeView<GraphTreeElement>) {
     if (!treeView.visible || !this.workingCopyChange) {
       return;
     }

@@ -11,7 +11,11 @@ import {
   OperationLogTreeDataProvider,
   OperationTreeItem,
 } from './operation_log_tree_view';
-import { JJGraphWebview } from './graph_webview';
+import {
+  JJGraphWebview,
+  promptSetBookmark,
+  promptPushBookmark,
+} from './graph_webview';
 import { getParams, toJJUri } from './uri';
 import { linesDiffComputers } from './vendor/vscode/editor/common/diff/linesDiffComputers';
 import {
@@ -692,6 +696,90 @@ export async function activate(context: vscode.ExtensionContext) {
                 `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
               );
             }
+          },
+        ),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.setBookmark',
+        showLoading(
+          async (
+            arg?:
+              | vscode.SourceControlResourceGroup
+              | GraphTreeItem
+              | { changeId: string },
+          ) => {
+            const repository =
+              arg instanceof GraphTreeItem
+                ? arg.getRepository()
+                : arg && 'id' in arg
+                  ? workspaceSCM.getRepositoryFromResourceGroup(arg)
+                  : workspaceSCM.repoSCMs[0]?.repository;
+
+            if (!repository) {
+              throw new Error('Repository not found');
+            }
+
+            const changeId =
+              arg instanceof GraphTreeItem
+                ? arg.getChangeId()
+                : arg && 'id' in arg
+                  ? arg.id
+                  : arg && 'changeId' in arg
+                    ? arg.changeId
+                    : '@';
+
+            await promptSetBookmark(repository, changeId, workspaceSCM);
+          },
+        ),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.gitPushBookmark',
+        showLoading(
+          async (
+            arg?:
+              | vscode.SourceControlResourceGroup
+              | GraphTreeItem
+              | { changeId: string; bookmarks?: string[] },
+          ) => {
+            const repository =
+              arg instanceof GraphTreeItem
+                ? arg.getRepository()
+                : arg && 'id' in arg
+                  ? workspaceSCM.getRepositoryFromResourceGroup(arg)
+                  : workspaceSCM.repoSCMs[0]?.repository;
+
+            if (!repository) {
+              throw new Error('Repository not found');
+            }
+
+            const changeId =
+              arg instanceof GraphTreeItem
+                ? arg.getChangeId()
+                : arg && 'id' in arg
+                  ? arg.id
+                  : arg && 'changeId' in arg
+                    ? arg.changeId
+                    : '@';
+
+            const bookmarks =
+              arg instanceof GraphTreeItem
+                ? arg.getChange().bookmarks
+                : arg && 'bookmarks' in arg
+                  ? arg.bookmarks
+                  : undefined;
+
+            await promptPushBookmark(
+              repository,
+              changeId,
+              bookmarks,
+              workspaceSCM,
+            );
           },
         ),
       ),
