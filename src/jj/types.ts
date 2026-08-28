@@ -10,6 +10,7 @@ export type FileStatus = {
   file: string;
   path: string;
   renamedFrom?: string;
+  isConflict?: boolean;
 };
 
 export interface Change {

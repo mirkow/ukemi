@@ -21,7 +21,13 @@ export interface Config {
   enableAnnotations: boolean;
   commandTimeout: number | null;
   jjPath: string;
+  mainBookmark: string;
   graph: GraphConfig;
+}
+
+export function getMainBookmark(scope?: vscode.Uri): string {
+  const config = vscode.workspace.getConfiguration('ukemi', scope);
+  return config.get<string>('mainBookmark') || config.get<string>('main') || 'main@origin';
 }
 
 export function getGraphConfig(scope?: vscode.Uri): GraphConfig {
@@ -45,6 +51,7 @@ export function getConfig(scope?: vscode.Uri): Config {
     enableAnnotations: config.get<boolean>('enableAnnotations', true),
     commandTimeout: config.get<number | null>('commandTimeout', null),
     jjPath: config.get<string>('jjPath', ''),
+    mainBookmark: getMainBookmark(scope),
     graph: getGraphConfig(scope),
   };
 }

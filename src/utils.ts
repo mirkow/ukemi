@@ -230,3 +230,81 @@ export function getActiveTextEditorDiff(): TabInputTextDiff | undefined {
 
   return activeTab.input;
 }
+
+export function formatRelativeTime(
+  dateStrOrTimestamp: string | Date | number,
+  nowTimestamp: number = Date.now(),
+): string {
+  if (!dateStrOrTimestamp) {
+    return '';
+  }
+  const date =
+    dateStrOrTimestamp instanceof Date
+      ? dateStrOrTimestamp
+      : typeof dateStrOrTimestamp === 'number'
+        ? new Date(dateStrOrTimestamp * 1000)
+        : new Date(
+            isNaN(new Date(dateStrOrTimestamp.replace(' ', 'T')).getTime())
+              ? dateStrOrTimestamp
+              : dateStrOrTimestamp.replace(' ', 'T'),
+          );
+
+  if (
+    isNaN(date.getTime()) ||
+    date.getTime() === 0 ||
+    date.getFullYear() <= 1970
+  ) {
+    return '';
+  }
+
+  const diffSeconds = Math.max(
+    0,
+    Math.floor((nowTimestamp - date.getTime()) / 1000),
+  );
+
+  if (diffSeconds < 45) {
+    return 'few seconds';
+  }
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return diffMinutes === 1 ? '1 minute' : `${diffMinutes} minutes`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return diffHours === 1 ? '1 hour' : `${diffHours} hours`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) {
+    return diffDays === 1 ? '1 day' : `${diffDays} days`;
+  }
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffDays < 30) {
+    return diffWeeks === 1 ? '1 week' : `${diffWeeks} weeks`;
+  }
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffDays < 365) {
+    return diffMonths === 1 ? '1 month' : `${diffMonths} months`;
+  }
+  const diffYears = Math.floor(diffDays / 365);
+  return diffYears === 1 ? '1 year' : `${diffYears} years`;
+}
+
+export function toItalic(text: string): string {
+  let result = '';
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    if (code >= 65 && code <= 90) {
+      // A-Z -> Sans-serif italic U+1D608 .. U+1D621
+      result += String.fromCodePoint(0x1d608 + (code - 65));
+    } else if (code >= 97 && code <= 122) {
+      // a-z -> Sans-serif italic U+1D622 .. U+1D63B
+      result += String.fromCodePoint(0x1d622 + (code - 97));
+    } else if (code >= 48 && code <= 57) {
+      // 0-9 -> Sans-serif digits U+1D7E2 .. U+1D7EB
+      result += String.fromCodePoint(0x1d7e2 + (code - 48));
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}

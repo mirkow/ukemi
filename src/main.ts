@@ -22,11 +22,12 @@ import { match } from 'arktype';
 import { getActiveTextEditorDiff, pathEquals } from './utils';
 import { openDiff, openFile } from './open_file';
 import {
+  CommitFileTreeItem,
   GraphTreeDataProvider,
   GraphTreeItem,
   GraphTreeView,
 } from './graph_tree_view';
-import { getConfig } from './config';
+import { getConfig, getMainBookmark } from './config';
 import { getLogger } from './logger';
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -644,14 +645,33 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.describe',
-        async (resourceGroup: vscode.SourceControlResourceGroup) => {
+        async (
+          arg?:
+            | vscode.SourceControlResourceGroup
+            | GraphTreeItem
+            | { changeId: string },
+        ) => {
           const repository =
-            workspaceSCM.getRepositoryFromResourceGroup(resourceGroup);
+            arg instanceof GraphTreeItem
+              ? arg.getRepository()
+              : arg && 'id' in arg
+                ? workspaceSCM.getRepositoryFromResourceGroup(arg)
+                : workspaceSCM.repoSCMs[0]?.repository;
+
           if (!repository) {
             throw new Error('Repository not found');
           }
 
-          const showResult = await repository.show(resourceGroup.id);
+          const changeId =
+            arg instanceof GraphTreeItem
+              ? arg.getChangeId()
+              : arg && 'id' in arg
+                ? arg.id
+                : arg && 'changeId' in arg
+                  ? arg.changeId
+                  : '@';
+
+          const showResult = await repository.show(changeId);
 
           const message = await vscode.window.showInputBox({
             prompt: 'Provide a description',
@@ -664,7 +684,7 @@ export async function activate(context: vscode.ExtensionContext) {
           }
 
           try {
-            await repository.describeRetryImmutable(resourceGroup.id, message);
+            await repository.describeRetryImmutable(changeId, message);
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -843,6 +863,62 @@ export async function activate(context: vscode.ExtensionContext) {
         } catch (error) {
           vscode.window.showErrorMessage(
             `Failed to refresh graph${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.undo',
+        showLoading(async () => {
+          const repository =
+            graphWebview?.repository ?? workspaceSCM.repoSCMs[0]?.repository;
+          if (!repository) {
+            return;
+          }
+          try {
+            await repository.undo();
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to undo${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('jj.filterGraph', async () => {
+        try {
+          await graphTreeView.promptFilter();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to filter commits${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('jj.clearGraphFilter', async () => {
+        try {
+          await graphTreeView.clearFilter();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to clear filter${error instanceof Error ? `: ${error.message}` : ''}`,
+          );
+        }
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('jj.refreshGraph', async () => {
+        try {
+          await graphTreeView.refresh();
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to refresh commits${error instanceof Error ? `: ${error.message}` : ''}`,
           );
         }
       }),
@@ -1394,13 +1470,170 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
       vscode.commands.registerCommand(
+        'jj.copyCommitId',
+        (item: GraphTreeItem) => {
+          vscode.env.clipboard.writeText(item.getCommitId());
+        },
+      ),
+    );
+
+    const promptRebase = async (
+      item: GraphTreeItem | undefined,
+      withDescendants: boolean,
+    ) => {
+      const repository =
+        item?.getRepository() ?? workspaceSCM.repoSCMs[0]?.repository;
+      if (!repository) {
+        return;
+      }
+
+      const sourceChangeId = item ? item.getChangeId() : '@';
+      const sourceShortId = sourceChangeId.substring(0, 8);
+
+      try {
+        const changes: ChangeWithDetails[] = await repository
+          .getChanges(['all()'], { noIntegrate: true, limit: 200 })
+          .catch(() => repository.getChanges([], { noIntegrate: true }));
+
+        const candidateChanges = changes.filter(
+          (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
+        );
+
+        interface CommitQuickPickItem extends vscode.QuickPickItem {
+          changeId: string;
+        }
+
+        const items: CommitQuickPickItem[] = candidateChanges.map((change) => {
+          const shortChange = change.changeId.substring(0, 8);
+          const shortCommit = change.commitId.substring(0, 8);
+          const firstLine = change.description
+            ? change.description.split('\n')[0]
+            : '(no description)';
+          const bookmarkStr =
+            change.bookmarks.length > 0
+              ? ` [${change.bookmarks.join(', ')}]`
+              : '';
+          return {
+            label: `$(git-commit) ${firstLine}`,
+            description: `${shortChange}${bookmarkStr} (${shortCommit})`,
+            detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
+            changeId: change.changeId,
+          };
+        });
+
+        const title = withDescendants
+          ? `Rebase ${sourceShortId} (including descendants) onto...`
+          : `Rebase ${sourceShortId} (without descendants) onto...`;
+
+        const selection = await vscode.window.showQuickPick(items, {
+          title,
+          placeHolder:
+            'Select destination commit (search description, commit ID, change ID, bookmarks)...',
+          matchOnDescription: true,
+          matchOnDetail: true,
+        });
+
+        if (!selection) {
+          return;
+        }
+
+        await repository.rebaseRetryImmutable({
+          sourceRev: sourceChangeId,
+          destRev: selection.changeId,
+          withDescendants,
+        });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
+        );
+      }
+    };
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.rebaseIncludingDescendants',
+        showLoading(async (item?: GraphTreeItem) => {
+          await promptRebase(item, true);
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.rebaseWithoutDescendants',
+        showLoading(async (item?: GraphTreeItem) => {
+          await promptRebase(item, false);
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.fetchAndSyncToMain',
+        showLoading(async (item?: GraphTreeItem) => {
+          const repository =
+            item?.getRepository() ?? workspaceSCM.repoSCMs[0]?.repository;
+          if (!repository) {
+            return;
+          }
+
+          const sourceChangeId = item ? item.getChangeId() : '@';
+          const sourceShortId = sourceChangeId.slice(0, 8);
+
+          try {
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Fetching and syncing ${sourceShortId} to main...`,
+                cancellable: false,
+              },
+              async () => {
+                await repository.gitFetch();
+                const mainBookmark = getMainBookmark(
+                  repository.repositoryRoot
+                    ? vscode.Uri.file(repository.repositoryRoot)
+                    : undefined,
+                );
+                await repository.rebaseRetryImmutable({
+                  sourceRev: sourceChangeId,
+                  destRev: mainBookmark,
+                  withDescendants: true,
+                });
+              },
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
         'jj.update',
         showLoading(async (item: GraphTreeItem) => {
           try {
             await item.getRepository().new(undefined, [item.getChangeId()]);
           } catch (error) {
             vscode.window.showErrorMessage(
-              `Failed to update to change${error instanceof Error ? `: ${error.message}` : ''}`,
+              `Failed to create new change on this commit${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+        }),
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'jj.edit',
+        showLoading(async (item: GraphTreeItem) => {
+          try {
+            await item.getRepository().editRetryImmutable(item.getChangeId());
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to edit change${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
         }),
@@ -1411,8 +1644,16 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(
         'jj.abandon',
         showLoading(async (item: GraphTreeItem) => {
+          const shortId = item.getChangeId().slice(0, 8);
+          const rawDesc =
+            item.getDescription() || item.getChange()?.description || '';
+          const desc = rawDesc
+            .replace(/^\(empty\)\s*/, '')
+            .split('\n')[0]
+            .trim();
+          const descText = desc ? ` "${desc}"` : '';
           const result = await vscode.window.showWarningMessage(
-            `Are you sure that you want to abandon ${item.getChangeId().slice(0, 8)}?`,
+            `Are you sure that you want to abandon ${shortId}${descText}?`,
             { modal: true },
             'Abandon',
           );
@@ -1455,10 +1696,19 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.copyPath',
-        async (resourceState: vscode.SourceControlResourceState) => {
-          await vscode.env.clipboard.writeText(
-            resourceState.resourceUri.fsPath,
-          );
+        async (
+          resource:
+            | vscode.SourceControlResourceState
+            | CommitFileTreeItem
+            | vscode.Uri,
+        ) => {
+          const uri =
+            resource instanceof vscode.Uri
+              ? resource
+              : resource?.resourceUri;
+          if (uri) {
+            await vscode.env.clipboard.writeText(uri.fsPath);
+          }
         },
       ),
     );
@@ -1466,10 +1716,21 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'jj.copyRelativePath',
-        async (resourceState: vscode.SourceControlResourceState) => {
-          await vscode.env.clipboard.writeText(
-            vscode.workspace.asRelativePath(resourceState.resourceUri.fsPath),
-          );
+        async (
+          resource:
+            | vscode.SourceControlResourceState
+            | CommitFileTreeItem
+            | vscode.Uri,
+        ) => {
+          const uri =
+            resource instanceof vscode.Uri
+              ? resource
+              : resource?.resourceUri;
+          if (uri) {
+            await vscode.env.clipboard.writeText(
+              vscode.workspace.asRelativePath(uri.fsPath),
+            );
+          }
         },
       ),
     );

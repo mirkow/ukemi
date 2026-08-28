@@ -81,7 +81,10 @@ export class OperationLogTreeDataProvider implements TreeDataProvider<unknown> {
     return element;
   }
 
-  getChildren(): OperationTreeItem[] {
+  async getChildren(): Promise<OperationTreeItem[]> {
+    if (this.operationTreeItems.length === 0) {
+      await this.refresh();
+    }
     return this.operationTreeItems;
   }
 

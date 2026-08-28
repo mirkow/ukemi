@@ -1,14 +1,71 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
+import type { ChangeWithDetails } from './jj/types';
 import path from 'path';
-import { getGraphConfig } from './config';
+import { getGraphConfig, getMainBookmark } from './config';
+import { toJJUri } from './uri';
 
-type Message = {
-  command: string;
-  changeId: string;
-  selectedNodes: string[];
-};
+type Message =
+  | {
+      command: 'webviewReady';
+    }
+  | {
+      command: 'editChange';
+      changeId: string;
+    }
+  | {
+      command: 'selectChange';
+      selectedNodes: string[];
+    }
+  | {
+      command: 'getCommitFiles';
+      changeId: string;
+    }
+  | {
+      command: 'openFileDiff';
+      changeId: string;
+      fileStatus: {
+        type: 'A' | 'M' | 'D' | 'R' | 'C';
+        file: string;
+        path: string;
+        renamedFrom?: string;
+      };
+    }
+  | {
+      command: 'copyPath';
+      path: string;
+    }
+  | {
+      command: 'copyRelativePath';
+      file: string;
+    }
+  | {
+      command: 'copyText';
+      text: string;
+    }
+  | {
+      command: 'rebaseChange';
+      changeId: string;
+      withDescendants?: boolean;
+    }
+  | {
+      command: 'newChange';
+      changeId: string;
+    }
+  | {
+      command: 'abandonChange';
+      changeId: string;
+      description?: string;
+    }
+  | {
+      command: 'fetchAndSyncToMain';
+      changeId: string;
+    }
+  | {
+      command: 'describeChange';
+      changeId: string;
+    };
 
 export class ChangeNode {
   constructor(
@@ -26,6 +83,8 @@ export class ChangeNode {
     readonly email?: string,
     readonly timestamp?: string,
     readonly timestampAgo?: string,
+    readonly isEmpty?: boolean,
+    readonly isConflict?: boolean,
   ) {}
 }
 
@@ -115,6 +174,239 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
             message.selectedNodes.length,
           );
           break;
+        case 'getCommitFiles':
+          try {
+            const showResult = await this.repository.show(message.changeId, {
+              noIntegrate: true,
+            });
+            await this.panel?.webview.postMessage({
+              command: 'commitFilesLoaded',
+              changeId: message.changeId,
+              files: showResult.fileStatuses,
+            });
+          } catch (error) {
+            await this.panel?.webview.postMessage({
+              command: 'commitFilesLoaded',
+              changeId: message.changeId,
+              files: [],
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          break;
+        case 'openFileDiff': {
+          try {
+            const { changeId, fileStatus } = message;
+            const changes = await this.repository.getChanges([changeId], {
+              noIntegrate: true,
+            });
+            const change = changes[0];
+            const originalRev = change?.parentChangeIds?.[0] || `${changeId}-`;
+            const fromPath = fileStatus.renamedFrom || fileStatus.file;
+            const leftUri = toJJUri(
+              vscode.Uri.file(
+                path.join(this.repository.repositoryRoot, fromPath),
+              ),
+              { diffOriginalRev: originalRev },
+            );
+            const rightUri =
+              change?.isCurrentWorkingCopy && fileStatus.type !== 'D'
+                ? vscode.Uri.file(
+                    path.join(this.repository.repositoryRoot, fileStatus.file),
+                  )
+                : toJJUri(
+                    vscode.Uri.file(
+                      path.join(
+                        this.repository.repositoryRoot,
+                        fileStatus.file,
+                      ),
+                    ),
+                    { rev: changeId },
+                  );
+            const shortChangeId = changeId.slice(0, 8);
+            const shortOriginalRev = originalRev.slice(0, 8);
+            const diffTitle = `${path.basename(fileStatus.file)} (${shortChangeId} vs ${shortOriginalRev})`;
+            await vscode.commands.executeCommand(
+              'vscode.diff',
+              leftUri,
+              rightUri,
+              diffTitle,
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to open diff: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          break;
+        }
+        case 'copyPath':
+          if (message.path) {
+            await vscode.env.clipboard.writeText(message.path);
+          }
+          break;
+        case 'copyRelativePath':
+          if (message.file) {
+            await vscode.env.clipboard.writeText(message.file);
+          }
+          break;
+        case 'copyText':
+          if (message.text) {
+            await vscode.env.clipboard.writeText(message.text);
+          }
+          break;
+        case 'newChange':
+          try {
+            await this.repository.new(undefined, [message.changeId]);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to create new change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'abandonChange':
+          try {
+            const shortId = message.changeId.slice(0, 8);
+            let desc = message.description
+              ? message.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+              : '';
+            if (!desc) {
+              const showResult = await this.repository
+                .show(message.changeId)
+                .catch(() => undefined);
+              desc = showResult?.change.description
+                ? showResult.change.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+                : '';
+            }
+            const descText = desc ? ` "${desc}"` : '';
+            const result = await vscode.window.showWarningMessage(
+              `Are you sure that you want to abandon ${shortId}${descText}?`,
+              { modal: true },
+              'Abandon',
+            );
+            if (result !== 'Abandon') {
+              break;
+            }
+            await this.repository.abandon(message.changeId);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to abandon change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'fetchAndSyncToMain':
+          try {
+            const shortId = message.changeId.slice(0, 8);
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Fetching and syncing ${shortId} to main...`,
+                cancellable: false,
+              },
+              async () => {
+                await this.repository.gitFetch();
+                const mainBookmark = getMainBookmark(
+                  this.repository.repositoryRoot
+                    ? vscode.Uri.file(this.repository.repositoryRoot)
+                    : undefined,
+                );
+                await this.repository.rebaseRetryImmutable({
+                  sourceRev: message.changeId,
+                  destRev: mainBookmark,
+                  withDescendants: true,
+                });
+              },
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'describeChange':
+          try {
+            const showResult = await this.repository.show(message.changeId);
+            const input = await vscode.window.showInputBox({
+              prompt: 'Provide a description',
+              placeHolder: 'Change description here...',
+              value: showResult.change.description,
+            });
+            if (input === undefined) {
+              break;
+            }
+            await this.repository.describeRetryImmutable(
+              message.changeId,
+              input,
+            );
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
+        case 'rebaseChange':
+          try {
+            const sourceChangeId = message.changeId;
+            const sourceShortId = sourceChangeId.substring(0, 8);
+            const withDescendants = message.withDescendants !== false;
+
+            const changes: ChangeWithDetails[] = await this.repository
+              .getChanges(['all()'], { noIntegrate: true, limit: 200 })
+              .catch(() => this.repository.getChanges([], { noIntegrate: true }));
+
+            const candidateChanges = changes.filter(
+              (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
+            );
+
+            interface CommitQuickPickItem extends vscode.QuickPickItem {
+              changeId: string;
+            }
+
+            const items: CommitQuickPickItem[] = candidateChanges.map(
+              (change) => {
+                const shortChange = change.changeId.substring(0, 8);
+                const shortCommit = change.commitId.substring(0, 8);
+                const firstLine = change.description
+                  ? change.description.split('\n')[0]
+                  : '(no description)';
+                const bookmarkStr =
+                  change.bookmarks.length > 0
+                    ? ` [${change.bookmarks.join(', ')}]`
+                    : '';
+                return {
+                  label: `$(git-commit) ${firstLine}`,
+                  description: `${shortChange}${bookmarkStr} (${shortCommit})`,
+                  detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
+                  changeId: change.changeId,
+                };
+              },
+            );
+
+            const title = withDescendants
+              ? `Rebase ${sourceShortId} (including descendants) onto...`
+              : `Rebase ${sourceShortId} (without descendants) onto...`;
+
+            const selection = await vscode.window.showQuickPick(items, {
+              title,
+              placeHolder:
+                'Select destination commit (search description, commit ID, change ID, bookmarks)...',
+              matchOnDescription: true,
+              matchOnDetail: true,
+            });
+
+            if (!selection) {
+              break;
+            }
+
+            await this.repository.rebaseRetryImmutable({
+              sourceRev: sourceChangeId,
+              destRev: selection.changeId,
+              withDescendants,
+            });
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
+            );
+          }
+          break;
       }
     });
 
@@ -138,22 +430,23 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     }
 
     // Use a custom template to ensure we get all the fields we need in a parseable format
-    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|description
+    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|is_immutable|is_conflict|description
     const template = `
       concat(
         "JJLOGSTART|",
-        self.change_id().short(), "|",
+        self.change_id(), "|",
         self.change_id().shortest(), "|",
-        parents.map(|p| p.change_id().short()).join(" "), "|",
+        parents.map(|p| p.change_id()).join(" "), "|",
         author.email(), "|",
         author.timestamp().format("%Y-%m-%d %H:%M:%S"), "|",
         author.timestamp().ago(), "|",
         bookmarks.map(|b| b.name()).join(", "), "|",
-        self.commit_id().short(), "|",
+        self.commit_id(), "|",
         self.commit_id().shortest(), "|",
         if(current_working_copy, "@", if(self.working_copies(), "@", if(self.contained_in("visible_heads()"), "◆", "○"))), "|",
         if(self.empty(), "true", "false"), "|",
         if(self.immutable(), "true", "false"), "|",
+        if(self.conflict(), "true", "false"), "|",
         description.first_line(),
         "\\n"
       )
@@ -246,7 +539,8 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         nodeA.label === nodeB.label &&
         nodeA.tooltip === nodeB.tooltip &&
         nodeA.description === nodeB.description &&
-        nodeA.contextValue === nodeB.contextValue
+        nodeA.contextValue === nodeB.contextValue &&
+        nodeA.isConflict === nodeB.isConflict
       );
     });
   }
@@ -270,7 +564,7 @@ export function parseJJLog(output: string): ChangeNode[] {
     const dataPart = line.substring(sentinelIndex + 'JJLOGSTART|'.length);
     const parts = dataPart.split('|');
 
-    if (parts.length < 13) {
+    if (parts.length < 14) {
       continue;
     }
 
@@ -287,6 +581,7 @@ export function parseJJLog(output: string): ChangeNode[] {
       branchIndicator,
       isEmptyStr,
       isImmutableStr,
+      isConflictStr,
       rawDescription,
     ] = parts;
 
@@ -326,16 +621,20 @@ export function parseJJLog(output: string): ChangeNode[] {
     }
 
     const isImmutable = isImmutableStr.trim() === 'true';
+    const isEmpty = isEmptyStr.trim() === 'true';
+    const isConflict = isConflictStr.trim() === 'true';
 
     // Construct simplified label (though frontend uses description directly now)
     const formattedLabel = `${description}`;
+    const conflictTooltip = isConflict ? '\n\n(conflict)' : '';
+    const tooltip = `${description}${conflictTooltip}\n\n${email} ${timestamp}`;
 
     changeNodes.push(
       new ChangeNode(
         formattedLabel,
         description,
         isImmutable,
-        `${description}\n\n${email} ${timestamp}`,
+        tooltip,
         changeId,
         shortestChangeId,
         parentChangeIds,
@@ -346,6 +645,8 @@ export function parseJJLog(output: string): ChangeNode[] {
         email,
         timestamp,
         timestampAgo,
+        isEmpty,
+        isConflict,
       ),
     );
   }

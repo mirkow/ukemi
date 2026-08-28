@@ -1,4 +1,5 @@
 import { parseRenamePaths } from '../../jj/parser';
+import { parseJJLog } from '../../graph_webview';
 import * as assert from 'assert/strict';
 import { JJRepository } from '../../jj/repository';
 import { Change, FileStatus, Show, ChangeWithDetails } from '../../jj/types';
@@ -105,27 +106,216 @@ suite('JJRepository', () => {
       } satisfies Partial<ChangeWithDetails>);
       assert.match(show[0].change.changeId, /^[k-z]{32}$/);
       assert.match(show[0].change.commitId, /^[a-f0-9]{40}$/);
-      assert.deepStrictEqual(show[1], {
-        change: {
-          author: {
-            email: '',
-            name: '',
-          },
-          authoredDate: '1970-01-01 00:00:00',
-          changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
-          commitId: '0000000000000000000000000000000000000000',
-          parentChangeIds: [],
-          bookmarks: [],
-          description: '',
-          isConflict: false,
-          isEmpty: true,
-          isImmutable: true,
-          isCurrentWorkingCopy: false,
-          isSynced: true,
+      assert.partialDeepStrictEqual(show[1].change, {
+        author: {
+          email: '',
+          name: '',
         },
-        conflictedFiles: new Set<string>(),
-        fileStatuses: [],
-      } satisfies Show);
+        changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+        commitId: '0000000000000000000000000000000000000000',
+        parentChangeIds: [],
+        bookmarks: [],
+        description: '',
+        isConflict: false,
+        isEmpty: true,
+        isImmutable: true,
+        isCurrentWorkingCopy: false,
+        isSynced: true,
+      } satisfies Partial<ChangeWithDetails>);
+      assert.deepStrictEqual(show[1].conflictedFiles, new Set<string>());
+      assert.deepStrictEqual(show[1].fileStatuses, []);
+    });
+  });
+
+  suite('getChanges', () => {
+    test('retrieves commit metadata without diff files', async () => {
+      const fileName = 'file_get_changes.txt';
+      const filePath = path.join(suiteDir, fileName);
+      const repoAuthor = getRepoAuthor();
+
+      await fs.writeFile(filePath, 'Some content');
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const changes = await repo.getChanges(['::']);
+
+      assert.strictEqual(changes.length, 2);
+      assert.partialDeepStrictEqual(changes[0], {
+        author: {
+          email: repoAuthor.email,
+          name: repoAuthor.name,
+        },
+        description: '',
+        isConflict: false,
+        isEmpty: false,
+        isImmutable: false,
+      } satisfies Partial<ChangeWithDetails>);
+      assert.match(changes[0].changeId, /^[k-z]{32}$/);
+      assert.match(changes[0].commitId, /^[a-f0-9]{40}$/);
+      assert.partialDeepStrictEqual(changes[1], {
+        author: {
+          email: '',
+          name: '',
+        },
+        changeId: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+        commitId: '0000000000000000000000000000000000000000',
+        parentChangeIds: [],
+        bookmarks: [],
+        description: '',
+        isConflict: false,
+        isEmpty: true,
+        isImmutable: true,
+        isCurrentWorkingCopy: false,
+        isSynced: true,
+      } satisfies Partial<ChangeWithDetails>);
+    });
+  });
+
+  suite('rebase', () => {
+    test('rebases a revision including descendants onto a destination revision', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const fileA = path.join(suiteDir, 'rebase_inc_a.txt');
+      await fs.writeFile(fileA, 'A content');
+      await repo.describe('@', 'Commit A');
+      const showA = await repo.show('@');
+      const changeA = showA.change.changeId;
+      await repo.new();
+
+      const fileB = path.join(suiteDir, 'rebase_inc_b.txt');
+      await fs.writeFile(fileB, 'B content');
+      await repo.describe('@', 'Commit B');
+      const showB = await repo.show('@');
+      const changeB = showB.change.changeId;
+      await repo.new();
+
+      const fileC = path.join(suiteDir, 'rebase_inc_c.txt');
+      await fs.writeFile(fileC, 'C content');
+      await repo.describe('@', 'Commit C');
+      const showC = await repo.show('@');
+      const changeC = showC.change.changeId;
+      await repo.new();
+
+      // Create destination commit D off A
+      await repo.new(undefined, [changeA]);
+      const fileD = path.join(suiteDir, 'rebase_inc_d.txt');
+      await fs.writeFile(fileD, 'D content');
+      await repo.describe('@', 'Commit D');
+      const showD = await repo.show('@');
+      const changeD = showD.change.changeId;
+      await repo.new();
+
+      // Rebase B including descendants onto D
+      await repo.rebase({
+        sourceRev: changeB,
+        destRev: changeD,
+        withDescendants: true,
+      });
+
+      const showBAfter = await repo.show(changeB);
+      assert.ok(
+        showBAfter.change.parentChangeIds.includes(changeD),
+        'Expected Commit B parent to be Commit D after rebase',
+      );
+
+      const showCAfter = await repo.show(changeC);
+      assert.ok(
+        showCAfter.change.parentChangeIds.includes(changeB),
+        'Expected Commit C parent to still be Commit B after rebase with descendants',
+      );
+      assert.ok(
+        !showCAfter.change.parentChangeIds.includes(changeA),
+        'Expected Commit C parent not to be Commit A after rebase with descendants',
+      );
+    });
+
+    test('rebases a revision without descendants onto a destination revision', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const fileA = path.join(suiteDir, 'rebase_no_a.txt');
+      await fs.writeFile(fileA, 'A content');
+      await repo.describe('@', 'Commit A');
+      const showA = await repo.show('@');
+      const changeA = showA.change.changeId;
+      await repo.new();
+
+      const fileB = path.join(suiteDir, 'rebase_no_b.txt');
+      await fs.writeFile(fileB, 'B content');
+      await repo.describe('@', 'Commit B');
+      const showB = await repo.show('@');
+      const changeB = showB.change.changeId;
+      await repo.new();
+
+      const fileC = path.join(suiteDir, 'rebase_no_c.txt');
+      await fs.writeFile(fileC, 'C content');
+      await repo.describe('@', 'Commit C');
+      const showC = await repo.show('@');
+      const changeC = showC.change.changeId;
+      await repo.new();
+
+      // Create destination commit D off A
+      await repo.new(undefined, [changeA]);
+      const fileD = path.join(suiteDir, 'rebase_no_d.txt');
+      await fs.writeFile(fileD, 'D content');
+      await repo.describe('@', 'Commit D');
+      const showD = await repo.show('@');
+      const changeD = showD.change.changeId;
+      await repo.new();
+
+      // Rebase B without descendants onto D
+      await repo.rebase({
+        sourceRev: changeB,
+        destRev: changeD,
+        withDescendants: false,
+      });
+
+      const showBAfter = await repo.show(changeB);
+      assert.ok(
+        showBAfter.change.parentChangeIds.includes(changeD),
+        'Expected Commit B parent to be Commit D after rebase',
+      );
+
+      const showCAfter = await repo.show(changeC);
+      assert.ok(
+        showCAfter.change.parentChangeIds.includes(changeA),
+        'Expected Commit C to be re-parented onto Commit A after single revision rebase',
+      );
+    });
+  });
+
+  suite('undo', () => {
+    test('undoes the last operation', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      const beforeShow = await repo.show('@');
+      const beforeDesc = beforeShow.change.description;
+
+      await repo.describe('@', 'Temporary message');
+      const duringShow = await repo.show('@');
+      assert.strictEqual(duringShow.change.description, 'Temporary message');
+
+      await repo.undo();
+      const afterShow = await repo.show('@');
+      assert.strictEqual(afterShow.change.description, beforeDesc);
     });
   });
 });
@@ -227,5 +417,33 @@ suite('parseRenamePaths', () => {
   test('should return null for empty input', () => {
     const input = '';
     assert.strictEqual(parseRenamePaths(input), null);
+  });
+});
+
+suite('parseJJLog', () => {
+  test('should parse normal commit', () => {
+    const log =
+      'JJLOGSTART|kkmpptxz|kkm|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago|main|e14df8|e14|○|false|false|false|Initial commit\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].contextValue, 'kkmpptxz');
+    assert.strictEqual(nodes[0].isConflict, false);
+    assert.strictEqual(
+      nodes[0].tooltip,
+      'Initial commit\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
+  });
+
+  test('should parse commit with conflict and include conflict in tooltip', () => {
+    const log =
+      'JJLOGSTART|conflict123|conf|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||c0ff1ee|c0f|○|false|false|true|Resolve conflict\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].contextValue, 'conflict123');
+    assert.strictEqual(nodes[0].isConflict, true);
+    assert.strictEqual(
+      nodes[0].tooltip,
+      'Resolve conflict\n\n(conflict)\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
   });
 });

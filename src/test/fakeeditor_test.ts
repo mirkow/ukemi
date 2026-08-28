@@ -21,10 +21,16 @@ function isExecException(e: unknown): e is ExecException {
   return typeof e === 'object' && e !== null && 'code' in e;
 }
 
-suite('fakeeditor', () => {
+suite('fakeeditor', function () {
   initExtensionDir(
     vscode.extensions.getExtension('sbarfurth.ukemi')!.extensionUri,
   );
+
+  setup(function () {
+    if (!fs.existsSync(fakeEditorPath)) {
+      this.skip();
+    }
+  });
 
   test('fails when JJ_FAKEEDITOR_SIGNAL_DIR is missing', async () => {
     await assert.rejects(

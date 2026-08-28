@@ -4,7 +4,7 @@
   "publisher": "sbarfurth",
   "description": "VSCode extension for the Jujutsu (jj) version control system",
   "icon": "images/logo.png",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "engines": {
     "vscode": "^1.96.0",
     "node": ">=22.17.0"
@@ -73,6 +73,12 @@
         "title": "Update change description",
         "category": "Jujutsu",
         "icon": "$(edit)"
+      },
+      {
+        "command": "jj.undo",
+        "title": "Undo",
+        "category": "Jujutsu",
+        "icon": "$(discard)"
       },
       {
         "command": "jj.new",
@@ -158,6 +164,24 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "jj.filterGraph",
+        "title": "Filter Commits...",
+        "category": "Jujutsu",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "jj.clearGraphFilter",
+        "title": "Clear Filter",
+        "category": "Jujutsu",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "jj.refreshGraph",
+        "title": "Refresh Commits",
+        "category": "Jujutsu",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "jj.newGraphWebview",
         "title": "Create new change with selected as parents",
         "category": "Jujutsu",
@@ -208,9 +232,39 @@
         "category": "Jujutsu"
       },
       {
-        "command": "jj.update",
-        "title": "Update",
+        "command": "jj.copyCommitId",
+        "title": "Copy Commit ID",
         "category": "Jujutsu"
+      },
+      {
+        "command": "jj.rebaseIncludingDescendants",
+        "title": "Rebase including descendants...",
+        "category": "Jujutsu",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "jj.rebaseWithoutDescendants",
+        "title": "Rebase without descendants...",
+        "category": "Jujutsu",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "jj.fetchAndSyncToMain",
+        "title": "Fetch and sync to main",
+        "category": "Jujutsu",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "jj.edit",
+        "title": "Edit",
+        "category": "Jujutsu",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "jj.update",
+        "title": "New commit on this",
+        "category": "Jujutsu",
+        "icon": "$(plus)"
       },
       {
         "command": "jj.abandon",
@@ -279,19 +333,39 @@
           "group": "navigation"
         },
         {
+          "command": "jj.undo",
+          "when": "view == jjGraphWebview",
+          "group": "navigation@1"
+        },
+        {
           "command": "jj.refreshGraphWebview",
           "when": "view == jjGraphWebview",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "jj.newGraphWebview",
           "when": "view == jjGraphWebview && jjGraphView.nodesSelected",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "jj.selectGraphWebviewRepo",
           "when": "view == jjGraphWebview",
-          "group": "navigation"
+          "group": "navigation@4"
+        },
+        {
+          "command": "jj.filterGraph",
+          "when": "view == jjGraph",
+          "group": "navigation@1"
+        },
+        {
+          "command": "jj.clearGraphFilter",
+          "when": "view == jjGraph && jjGraphView.hasFilter",
+          "group": "navigation@2"
+        },
+        {
+          "command": "jj.refreshGraph",
+          "when": "view == jjGraph",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -307,33 +381,78 @@
         },
         {
           "command": "jj.copyFullChangeId",
-          "when": "view == jjGraph",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@1"
         },
         {
           "command": "jj.copyShortChangeId",
-          "when": "view == jjGraph",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@2"
         },
         {
-          "command": "jj.copyDescription",
-          "when": "view == jjGraph",
+          "command": "jj.copyCommitId",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "1_item_copy@3"
         },
         {
-          "command": "jj.update",
-          "when": "view == jjGraph",
+          "command": "jj.copyDescription",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "1_item_copy@4"
+        },
+        {
+          "command": "jj.describe",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@0"
+        },
+        {
+          "command": "jj.rebaseIncludingDescendants",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@1"
         },
         {
-          "command": "jj.abandon",
-          "when": "view == jjGraph && viewItem == mutable",
+          "command": "jj.rebaseWithoutDescendants",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@2"
+        },
+        {
+          "command": "jj.fetchAndSyncToMain",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@3"
+        },
+        {
+          "command": "jj.edit",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@4"
+        },
+        {
+          "command": "jj.update",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@5"
         },
         {
           "command": "jj.abandon",
           "when": "view == jjGraph && viewItem == mutable",
-          "group": "inline"
+          "group": "2_item_action@6"
+        },
+        {
+          "command": "jj.edit",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "inline@1"
+        },
+        {
+          "command": "jj.abandon",
+          "when": "view == jjGraph && viewItem == mutable",
+          "group": "inline@2"
+        },
+        {
+          "command": "jj.copyRelativePath",
+          "when": "view == jjGraph && viewItem == commitFile",
+          "group": "1_copypath@1"
+        },
+        {
+          "command": "jj.copyPath",
+          "when": "view == jjGraph && viewItem == commitFile",
+          "group": "1_copypath@2"
         }
       ],
       "scm/title": [
@@ -532,6 +651,12 @@
           "type": "string",
           "default": "",
           "description": "Path to the jj executable. If not set, your PATH and common locations will be searched for a jj executable.",
+          "scope": "resource"
+        },
+        "ukemi.mainBookmark": {
+          "type": "string",
+          "default": "main@origin",
+          "markdownDescription": "The name or revset of the main bookmark to sync to when running 'Fetch and sync to main' (e.g. `main@origin`, `master@origin`, `trunk()`).",
           "scope": "resource"
         },
         "ukemi.graph.viewLayout": {
@@ -742,7 +867,7 @@
     ]
   },
   "scripts": {
-    "build": "npm run check-types && npm run lint && node esbuild.js --production && cp -r src/webview dist/ && cp src/config.toml dist/ && mkdir -p dist/codicons && cp -r node_modules/@vscode/codicons/dist/* dist/codicons/ && npm run build:fakeeditor && mkdir -p dist/fakeeditor/zig-out/bin && cp -r src/fakeeditor/zig-out/bin/. dist/fakeeditor/zig-out/bin/",
+    "build": "npm run check-types && npm run lint && node esbuild.js --production && cp -r src/webview dist/ && cp src/config.toml dist/ && mkdir -p dist/codicons && cp -r node_modules/@vscode/codicons/dist/* dist/codicons/ && npm run build:fakeeditor && mkdir -p dist/fakeeditor/zig-out/bin && (test -d src/fakeeditor/zig-out/bin && cp -r src/fakeeditor/zig-out/bin/. dist/fakeeditor/zig-out/bin/ || true)",
     "build:fakeeditor": "cd src/fakeeditor && ./build_all_platforms.sh",
     "vscode:prepublish": "npm run build",
     "compile": "npm run check-types && npm run lint && node esbuild.js",

@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 
 import * as vscode from 'vscode';
-import { execJJPromise } from './utils';
+import { execJJPromise, getRepoPath } from './utils';
 
 suite('Extension Test Suite', () => {
   vscode.window.showInformationMessage('Start all tests.');
@@ -15,15 +15,20 @@ suite('Extension Test Suite', () => {
 
     const output = await execJJPromise(
       'operation log --limit 1 --no-graph --template "self.id()"',
+      { cwd: getRepoPath() },
     );
     originalOperation = output.stdout.trim();
   });
 
   teardown(async () => {
-    await execJJPromise(`operation restore ${originalOperation}`);
+    await execJJPromise(`operation restore ${originalOperation}`, {
+      cwd: getRepoPath(),
+    });
   });
 
   test('Sanity check: `jj status` succeeds', async () => {
-    await assert.doesNotReject(execJJPromise('status'));
+    await assert.doesNotReject(
+      execJJPromise('status', { cwd: getRepoPath() }),
+    );
   });
 });

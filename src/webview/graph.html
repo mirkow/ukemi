@@ -16,8 +16,222 @@
     </div>
     <script>
       const vscode = acquireVsCodeApi();
+      const GRAPH_COLUMN_OFFSET = 30;
       let selectedNodes = new Set();
       let currentWorkingCopyId;
+      const commitFilesCache = new Map();
+      const expandedNodes = new Set();
+      let activeContextMenu = null;
+
+      function hideContextMenu() {
+        if (activeContextMenu) {
+          activeContextMenu.remove();
+          activeContextMenu = null;
+        }
+      }
+
+      document.addEventListener('click', hideContextMenu);
+      document.addEventListener('contextmenu', (e) => {
+        if (
+          !e.target.closest('.change-node') &&
+          !e.target.closest('.commit-file-item')
+        ) {
+          hideContextMenu();
+        }
+      });
+      window.addEventListener('blur', hideContextMenu);
+      window.addEventListener('scroll', hideContextMenu);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideContextMenu();
+        }
+      });
+
+      function showNodeContextMenu(e, change) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+
+        function addItem(label, icon, onClick) {
+          const item = document.createElement('div');
+          item.className = 'context-menu-item';
+          item.innerHTML = `<i class="codicon ${icon}"></i><span>${label}</span>`;
+          item.onclick = (event) => {
+            event.stopPropagation();
+            hideContextMenu();
+            onClick();
+          };
+          menu.appendChild(item);
+        }
+
+        function addSeparator() {
+          const sep = document.createElement('div');
+          sep.className = 'context-menu-separator';
+          menu.appendChild(sep);
+        }
+
+        // Copy actions
+        if (change.commitId) {
+          addItem('Copy Commit ID', 'codicon-copy', () => {
+            vscode.postMessage({ command: 'copyText', text: change.commitId });
+          });
+        }
+
+        addItem('Copy Full Change ID', 'codicon-copy', () => {
+          vscode.postMessage({ command: 'copyText', text: change.contextValue });
+        });
+
+        addItem('Copy Short Change ID', 'codicon-copy', () => {
+          vscode.postMessage({
+            command: 'copyText',
+            text:
+              change.shortestChangeId || change.contextValue.substring(0, 8),
+          });
+        });
+
+        addItem('Copy Description', 'codicon-copy', () => {
+          vscode.postMessage({
+            command: 'copyText',
+            text: (change.description || '').replace(/^\(empty\)\s*/, ''),
+          });
+        });
+
+        addSeparator();
+
+        // Describe action
+        addItem('Edit description...', 'codicon-edit', () => {
+          vscode.postMessage({
+            command: 'describeChange',
+            changeId: change.contextValue,
+          });
+        });
+
+        // Rebase actions
+        addItem('Rebase including descendants...', 'codicon-git-branch', () => {
+          vscode.postMessage({
+            command: 'rebaseChange',
+            changeId: change.contextValue,
+            withDescendants: true,
+          });
+        });
+
+        addItem('Rebase without descendants...', 'codicon-git-branch', () => {
+          vscode.postMessage({
+            command: 'rebaseChange',
+            changeId: change.contextValue,
+            withDescendants: false,
+          });
+        });
+
+        addItem('Fetch and sync to main', 'codicon-sync', () => {
+          vscode.postMessage({
+            command: 'fetchAndSyncToMain',
+            changeId: change.contextValue,
+          });
+        });
+
+        addItem('New commit on this', 'codicon-plus', () => {
+          vscode.postMessage({
+            command: 'newChange',
+            changeId: change.contextValue,
+          });
+        });
+
+        if (change.branchType !== '@' && !change.isImmutable) {
+          addItem('Edit', 'codicon-edit', () => {
+            vscode.postMessage({
+              command: 'editChange',
+              changeId: change.contextValue,
+            });
+          });
+
+          addItem('Abandon', 'codicon-trash', () => {
+            vscode.postMessage({
+              command: 'abandonChange',
+              changeId: change.contextValue,
+              description: change.description,
+            });
+          });
+        }
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu;
+
+        // Position menu inside viewport
+        const menuRect = menu.getBoundingClientRect();
+        let x = e.clientX;
+        let y = e.clientY;
+
+        if (x + menuRect.width > window.innerWidth) {
+          x = Math.max(4, window.innerWidth - menuRect.width - 4);
+        }
+        if (y + menuRect.height > window.innerHeight) {
+          y = Math.max(4, window.innerHeight - menuRect.height - 4);
+        }
+
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+      }
+
+      function showFileContextMenu(e, changeId, file) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+
+        function addItem(label, icon, onClick) {
+          const item = document.createElement('div');
+          item.className = 'context-menu-item';
+          item.innerHTML = `<i class="codicon ${icon}"></i><span>${label}</span>`;
+          item.onclick = (event) => {
+            event.stopPropagation();
+            hideContextMenu();
+            onClick();
+          };
+          menu.appendChild(item);
+        }
+
+        addItem('Open diff', 'codicon-compare-changes', () => {
+          vscode.postMessage({
+            command: 'openFileDiff',
+            changeId: changeId,
+            fileStatus: file,
+          });
+        });
+
+        addItem('Copy Relative Path', 'codicon-files', () => {
+          vscode.postMessage({
+            command: 'copyRelativePath',
+            file: file.file,
+          });
+        });
+
+        addItem('Copy Full Path', 'codicon-copy', () => {
+          vscode.postMessage({ command: 'copyPath', path: file.path });
+        });
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu;
+
+        const menuRect = menu.getBoundingClientRect();
+        let x = e.clientX;
+        let y = e.clientY;
+
+        if (x + menuRect.width > window.innerWidth) {
+          x = Math.max(4, window.innerWidth - menuRect.width - 4);
+        }
+        if (y + menuRect.height > window.innerHeight) {
+          y = Math.max(4, window.innerHeight - menuRect.height - 4);
+        }
+
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+      }
 
       window.addEventListener('message', (event) => {
         const message = event.data;
@@ -53,6 +267,19 @@
               message.viewLayout,
             );
             break;
+          case 'commitFilesLoaded':
+            commitFilesCache.set(message.changeId, message.files || []);
+            const filesContainers = document.querySelectorAll(
+              `.node-files-container[data-change-id="${message.changeId}"]`,
+            );
+            filesContainers.forEach((fc) => {
+              renderFilesList(message.changeId, message.files || [], fc);
+            });
+            requestAnimationFrame(() => {
+              updateConnections();
+              updateCirclePositions();
+            });
+            break;
         }
       });
 
@@ -82,6 +309,29 @@
       function createCircle(change, workingCopyId) {
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('class', 'node-circle');
+
+        if (change.isConflict) {
+          g.classList.add('has-conflict');
+          // Background circle to clear connection lines behind the X
+          const bgCircle = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'circle',
+          );
+          bgCircle.setAttribute('cx', '6');
+          bgCircle.setAttribute('cy', '6');
+          bgCircle.setAttribute('r', '6');
+          bgCircle.style.fill = 'var(--vscode-editor-background, #1e1e1e)';
+          g.appendChild(bgCircle);
+
+          const xPath = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'path',
+          );
+          xPath.setAttribute('d', 'M 2.5 2.5 L 9.5 9.5 M 9.5 2.5 L 2.5 9.5');
+          xPath.setAttribute('class', 'conflict-x-path');
+          g.appendChild(xPath);
+          return g;
+        }
 
         const isWorkingCopy = change.branchType === '@';
         const radius = isWorkingCopy ? '7' : '5';
@@ -195,14 +445,14 @@
           const nodeRect = node.getBoundingClientRect();
 
           // Convert to SVG coordinates with vertical centering
-          const currentX = nodeRect.left - svgRect.left + 6;
+          const currentX = nodeRect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
           const currentY = nodeRect.top - svgRect.top + nodeRect.height / 2;
 
           parentIds.forEach((parentId, index) => {
             const parentNode = nodeMap.get(parentId);
             if (parentNode) {
               const parentRect = parentNode.getBoundingClientRect();
-              const parentX = parentRect.left - svgRect.left + 6;
+              const parentX = parentRect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
               const parentY =
                 parentRect.top - svgRect.top + parentRect.height / 2;
 
@@ -415,7 +665,7 @@
 
         const fromNode = Array.from(nodes).find((node) => {
           const rect = node.getBoundingClientRect();
-          const nodeX = rect.left - svgRect.left + 6;
+          const nodeX = rect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
           const nodeY = rect.top - svgRect.top + rect.height / 2;
           return (
             Math.abs(startX - nodeX) < tolerance &&
@@ -425,7 +675,7 @@
 
         const toNode = Array.from(nodes).find((node) => {
           const rect = node.getBoundingClientRect();
-          const nodeX = rect.left - svgRect.left + 6;
+          const nodeX = rect.left - svgRect.left + GRAPH_COLUMN_OFFSET;
           const nodeY = rect.top - svgRect.top + rect.height / 2;
           return (
             Math.abs(endX - nodeX) < tolerance &&
@@ -434,6 +684,131 @@
         });
 
         return [fromNode, toNode];
+      }
+
+      function renderFilesList(changeId, files, container) {
+        container.innerHTML = '';
+        if (!files || files.length === 0) {
+          const emptyDiv = document.createElement('div');
+          emptyDiv.className = 'file-empty-msg';
+          emptyDiv.textContent = '(no changed files)';
+          container.appendChild(emptyDiv);
+          return;
+        }
+
+        files.forEach((file) => {
+          const fileItem = document.createElement('div');
+          fileItem.className = 'commit-file-item';
+
+          const normalizedFile = file.file.replace(/\\/g, '/');
+          const fileName = normalizedFile.split('/').pop() || normalizedFile;
+          const fileDir = normalizedFile.includes('/')
+            ? normalizedFile.substring(0, normalizedFile.lastIndexOf('/'))
+            : '';
+
+          let statusIconClass = 'codicon-diff-modified';
+          let statusClass = 'file-status-M';
+          let statusTooltip = `Modified: ${normalizedFile}`;
+          let tagText = '';
+          let tagClass = 'file-tag-M';
+
+          if (file.isConflict) {
+            statusIconClass = 'codicon-error';
+            statusClass = 'file-status-conflict';
+            statusTooltip = `Conflict: ${normalizedFile} (unresolved conflicts)`;
+            tagText = '(conflict)';
+            tagClass = 'file-tag-conflict';
+          } else if (file.type === 'A') {
+            statusIconClass = 'codicon-diff-added';
+            statusClass = 'file-status-A';
+            statusTooltip = `Added: ${normalizedFile}`;
+            tagText = '(added)';
+            tagClass = 'file-tag-A';
+          } else if (file.type === 'D') {
+            statusIconClass = 'codicon-diff-removed';
+            statusClass = 'file-status-D';
+            statusTooltip = `Deleted: ${normalizedFile}`;
+            tagText = '(deleted)';
+            tagClass = 'file-tag-D';
+          } else if (file.type === 'R') {
+            statusIconClass = 'codicon-diff-renamed';
+            statusClass = 'file-status-R';
+            const fromPath = (file.renamedFrom || '').replace(/\\/g, '/');
+            statusTooltip = `Renamed: ${fromPath} → ${normalizedFile}`;
+            tagText = fromPath ? `${fromPath.split('/').pop()} →` : '(renamed)';
+            tagClass = 'file-tag-R';
+          }
+
+          fileItem.title = statusTooltip;
+
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'commit-file-info';
+
+          const icon = document.createElement('i');
+          icon.className = `codicon ${statusIconClass} ${statusClass}`;
+          infoDiv.appendChild(icon);
+
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'file-name';
+          nameSpan.textContent = fileName;
+          infoDiv.appendChild(nameSpan);
+
+          if (fileDir) {
+            const dirSpan = document.createElement('span');
+            dirSpan.className = 'file-dir';
+            dirSpan.textContent = fileDir;
+            infoDiv.appendChild(dirSpan);
+          }
+
+          if (tagText) {
+            const tagSpan = document.createElement('span');
+            tagSpan.className = `file-tag ${tagClass}`;
+            tagSpan.textContent = tagText;
+            infoDiv.appendChild(tagSpan);
+          }
+
+          fileItem.appendChild(infoDiv);
+
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'file-actions';
+
+          const copyRelBtn = document.createElement('button');
+          copyRelBtn.className = 'file-action-btn';
+          copyRelBtn.title = 'Copy Relative Path';
+          copyRelBtn.innerHTML = '<i class="codicon codicon-files"></i>';
+          copyRelBtn.onclick = (e) => {
+            e.stopPropagation();
+            vscode.postMessage({ command: 'copyRelativePath', file: file.file });
+          };
+          actionsDiv.appendChild(copyRelBtn);
+
+          const copyPathBtn = document.createElement('button');
+          copyPathBtn.className = 'file-action-btn';
+          copyPathBtn.title = 'Copy Full Path';
+          copyPathBtn.innerHTML = '<i class="codicon codicon-copy"></i>';
+          copyPathBtn.onclick = (e) => {
+            e.stopPropagation();
+            vscode.postMessage({ command: 'copyPath', path: file.path });
+          };
+          actionsDiv.appendChild(copyPathBtn);
+
+          fileItem.appendChild(actionsDiv);
+
+          fileItem.onclick = (e) => {
+            e.stopPropagation();
+            vscode.postMessage({
+              command: 'openFileDiff',
+              changeId: changeId,
+              fileStatus: file,
+            });
+          };
+
+          fileItem.addEventListener('contextmenu', (e) =>
+            showFileContextMenu(e, changeId, file),
+          );
+
+          container.appendChild(fileItem);
+        });
       }
 
       function updateGraph(
@@ -481,6 +856,7 @@
         changes.forEach((change) => {
           if (!change.contextValue) return;
 
+          const isExpanded = expandedNodes.has(change.contextValue);
           const shouldShowBookmarks =
             showBookmarks && change.bookmarks && change.bookmarks.length > 0;
           const shouldShowAuthor = showAuthor && change.email;
@@ -489,12 +865,27 @@
               (showTimestamp === 'immutable_only' && change.isImmutable)) &&
             change.timestampAgo;
 
+          const nodeWrapper = document.createElement('div');
+          nodeWrapper.className = 'node-wrapper';
+          nodeWrapper.dataset.changeId = change.contextValue;
+
           const node = document.createElement('div');
           node.className = 'change-node';
           node.title = change.tooltip;
           node.dataset.changeId = change.contextValue;
           node.dataset.parentIds = JSON.stringify(change.parentChangeIds || []);
           node.dataset.branchType = change.branchType;
+          node.dataset.isConflict = change.isConflict ? 'true' : 'false';
+
+          // Expand chevron button
+          const expandBtn = document.createElement('span');
+          expandBtn.className =
+            'expand-button' + (change.isEmpty ? ' hidden' : '');
+          expandBtn.title = 'Toggle changed files';
+          const chevron = document.createElement('i');
+          chevron.className = `codicon ${isExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`;
+          expandBtn.appendChild(chevron);
+          node.appendChild(expandBtn);
 
           // Create text content container
           const textContent = document.createElement('div');
@@ -632,7 +1023,64 @@
             editButton.style.display = 'none';
           }
           node.appendChild(editButton);
-          nodesContainer.appendChild(node);
+
+          // Create files container
+          const filesContainer = document.createElement('div');
+          filesContainer.className = 'node-files-container';
+          filesContainer.dataset.changeId = change.contextValue;
+          filesContainer.style.display = isExpanded ? 'flex' : 'none';
+
+          if (isExpanded) {
+            if (commitFilesCache.has(change.contextValue)) {
+              renderFilesList(
+                change.contextValue,
+                commitFilesCache.get(change.contextValue),
+                filesContainer,
+              );
+            } else {
+              filesContainer.innerHTML =
+                '<div class="file-loading-spinner"><i class="codicon codicon-loading codicon-modifier-spin"></i> Loading changed files...</div>';
+              vscode.postMessage({
+                command: 'getCommitFiles',
+                changeId: change.contextValue,
+              });
+            }
+          }
+
+          expandBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (expandedNodes.has(change.contextValue)) {
+              expandedNodes.delete(change.contextValue);
+              filesContainer.style.display = 'none';
+              chevron.className = 'codicon codicon-chevron-right';
+            } else {
+              expandedNodes.add(change.contextValue);
+              filesContainer.style.display = 'flex';
+              chevron.className = 'codicon codicon-chevron-down';
+              if (commitFilesCache.has(change.contextValue)) {
+                renderFilesList(
+                  change.contextValue,
+                  commitFilesCache.get(change.contextValue),
+                  filesContainer,
+                );
+              } else {
+                filesContainer.innerHTML =
+                  '<div class="file-loading-spinner"><i class="codicon codicon-loading codicon-modifier-spin"></i> Loading changed files...</div>';
+                vscode.postMessage({
+                  command: 'getCommitFiles',
+                  changeId: change.contextValue,
+                });
+              }
+            }
+            requestAnimationFrame(() => {
+              updateConnections();
+              updateCirclePositions();
+            });
+          };
+
+          nodeWrapper.appendChild(node);
+          nodeWrapper.appendChild(filesContainer);
+          nodesContainer.appendChild(nodeWrapper);
 
           // Add hover handlers
           node.addEventListener('mouseenter', () => {
@@ -659,6 +1107,10 @@
               selectedNodes: Array.from(selectedNodes),
             });
           };
+
+          node.addEventListener('contextmenu', (e) =>
+            showNodeContextMenu(e, change),
+          );
         });
 
         // Wait for next frame to ensure DOM is updated
@@ -690,12 +1142,13 @@
             {
               contextValue: contextValue,
               branchType: node.dataset.branchType,
+              isConflict: node.dataset.isConflict === 'true',
             },
             currentWorkingCopyId,
           );
 
           // Position the circle group
-          const x = nodeRect.left - svgRect.left;
+          const x = nodeRect.left - svgRect.left + GRAPH_COLUMN_OFFSET - 6;
           const y = nodeRect.top - svgRect.top + nodeRect.height / 2 - 6;
           g.setAttribute('transform', `translate(${x}, ${y})`);
 

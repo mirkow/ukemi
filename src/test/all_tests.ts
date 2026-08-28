@@ -4,3 +4,4 @@
 import './main_test';
 import './jj/repository_test';
 import './fakeeditor_test';
+import './graph_tree_view_test';

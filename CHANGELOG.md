@@ -1,5 +1,22 @@
 # Change Log
 
+## 0.0.13
+
+- Add collapsible list of changed files to both Commits tree view and Source Control Graph webview to inspect diffs and copy paths without checking out.
+- Add file status indicators (added, modified, deleted, renamed, conflict) in commit file lists.
+- Show conflict indicators on commit nodes and files across Source Control Graph and Commits tree view, including conflict notices in tooltips.
+- Add quick filter for Commits tree view searching descriptions, authors, and touched files.
+- Add context menu to Source Control Graph and Commits tree view with actions for:
+  - Copy Commit ID, Change ID, and Description
+  - Edit description
+  - Rebase including descendants (`jj rebase -s`) and Rebase without descendants (`jj rebase -r`) with QuickPick search across descriptions and IDs
+  - Fetch and sync to main (`jj.fetchAndSyncToMain`, with configurable `ukemi.mainBookmark` setting)
+  - Edit, New commit, and Abandon (with commit description quoted in confirmation popup)
+- Add JJ Undo button to the title bar of the Source Control Graph view.
+- Display italicized relative commit age in Commits tree view.
+- Fix diff viewer for added and deleted files in JJ file system provider.
+- Fix copying relative path on non-working copy revision. 
+
 ## 0.0.12
 
 - adds compact mode by @sesceu in https://github.com/sbarfurth/ukemi/pull/51
