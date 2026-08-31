@@ -5,6 +5,7 @@
 - Add context menu action to set or move bookmarks (`jj bookmark set`) with QuickPick selection of existing bookmarks or creation of new bookmark names.
 - Add context menu action to push bookmark/branch to remote (`jj git push --bookmark <name>`) when a commit has associated bookmarks.
 - Update "Fetch and sync to main" to "Fetch and rebase branch on `<main>`" using whole-branch rebasing (`jj rebase -b`) to automatically rebase the entire stack off main.
+- Fix commit file diffs in Source Control Graph and Commits tree view to compare directly against the parent revision rather than grandparent.
 - Actively trigger change detection and graph/SCM refresh immediately upon completion of mutating commands.
 
 ## 0.0.13

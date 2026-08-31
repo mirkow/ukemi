@@ -220,7 +220,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               vscode.Uri.file(
                 path.join(this.repository.repositoryRoot, fromPath),
               ),
-              { diffOriginalRev: originalRev },
+              { rev: originalRev },
             );
             const rightUri =
               change?.isCurrentWorkingCopy && fileStatus.type !== 'D'

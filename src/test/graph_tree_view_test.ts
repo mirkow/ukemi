@@ -155,9 +155,9 @@ suite('GraphTreeView', () => {
     ];
     assert.strictEqual(leftUri.scheme, 'jj');
     const leftParams = getParams(leftUri);
-    assert.ok('diffOriginalRev' in leftParams);
+    assert.ok('rev' in leftParams);
     assert.strictEqual(
-      leftParams.diffOriginalRev,
+      leftParams.rev,
       parentCommit.getParentChangeIds()?.[0] || `${parentCommit.getChangeId()}-`,
     );
 

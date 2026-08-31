@@ -361,7 +361,7 @@ export class CommitFileTreeItem extends TreeItem {
       Uri.file(
         path.join(this.dataProvider.getSelectedRepo().repositoryRoot, fromPath),
       ),
-      { diffOriginalRev: originalRev },
+      { rev: originalRev },
     );
     const rightUri =
       change.isCurrentWorkingCopy && fileStatus.type !== 'D'
