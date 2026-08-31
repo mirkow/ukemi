@@ -22,6 +22,7 @@
       const commitFilesCache = new Map();
       const expandedNodes = new Set();
       let activeContextMenu = null;
+      let configuredMainBookmark = 'main';
 
       function hideContextMenu() {
         if (activeContextMenu) {
@@ -151,12 +152,16 @@
           });
         });
 
-        addItem('Fetch and sync to main', 'codicon-sync', () => {
-          vscode.postMessage({
-            command: 'fetchAndSyncToMain',
-            changeId: change.contextValue,
-          });
-        });
+        addItem(
+          `Fetch and rebase branch on ${configuredMainBookmark}`,
+          'codicon-sync',
+          () => {
+            vscode.postMessage({
+              command: 'fetchAndSyncToMain',
+              changeId: change.contextValue,
+            });
+          },
+        );
 
         addItem('New commit on this', 'codicon-plus', () => {
           vscode.postMessage({
@@ -277,6 +282,9 @@
               );
             });
             currentWorkingCopyId = message.workingCopyId;
+            if (message.mainBookmark) {
+              configuredMainBookmark = message.mainBookmark;
+            }
             vscode.postMessage({
               command: 'selectChange',
               selectedNodes: [],

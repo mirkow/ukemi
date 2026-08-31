@@ -295,6 +295,83 @@ suite('JJRepository', () => {
         'Expected Commit C to be re-parented onto Commit A after single revision rebase',
       );
     });
+
+    test('rebases an entire branch onto a destination revision using wholeBranch', async () => {
+      const repo = new JJRepository(
+        getRepoPath(),
+        getJJPath(),
+        SemVer.parse('0.42.0'),
+        [],
+      );
+
+      // Create base commit Base
+      const fileBase = path.join(suiteDir, 'rebase_wb_base.txt');
+      await fs.writeFile(fileBase, 'Base content');
+      await repo.describe('@', 'Commit Base');
+      const showBase = await repo.show('@');
+      const changeBase = showBase.change.changeId;
+      await repo.new();
+
+      // Create branch A -> B -> C off Base
+      await repo.new(undefined, [changeBase]);
+      const fileA = path.join(suiteDir, 'rebase_wb_a.txt');
+      await fs.writeFile(fileA, 'A content');
+      await repo.describe('@', 'Commit A');
+      const showA = await repo.show('@');
+      const changeA = showA.change.changeId;
+      await repo.new();
+
+      // Create commit B off A
+      const fileB = path.join(suiteDir, 'rebase_wb_b.txt');
+      await fs.writeFile(fileB, 'B content');
+      await repo.describe('@', 'Commit B');
+      const showB = await repo.show('@');
+      const changeB = showB.change.changeId;
+      await repo.new();
+
+      // Create commit C off B
+      const fileC = path.join(suiteDir, 'rebase_wb_c.txt');
+      await fs.writeFile(fileC, 'C content');
+      await repo.describe('@', 'Commit C');
+      const showC = await repo.show('@');
+      const changeC = showC.change.changeId;
+      await repo.new();
+
+      // Create destination commit D off Base
+      await repo.new(undefined, [changeBase]);
+      const fileD = path.join(suiteDir, 'rebase_wb_d.txt');
+      await fs.writeFile(fileD, 'D content');
+      await repo.describe('@', 'Commit D');
+      const showD = await repo.show('@');
+      const changeD = showD.change.changeId;
+      await repo.new();
+
+      // Rebase entire branch using C as target onto D
+      await repo.rebase({
+        sourceRev: changeC,
+        destRev: changeD,
+        wholeBranch: true,
+      });
+
+      // Commit A (the root of the branch off Base) should now be on D
+      const showAAfter = await repo.show(changeA);
+      assert.ok(
+        showAAfter.change.parentChangeIds.includes(changeD),
+        'Expected root Commit A parent to be Commit D after wholeBranch rebase',
+      );
+
+      const showBAfter = await repo.show(changeB);
+      assert.ok(
+        showBAfter.change.parentChangeIds.includes(changeA),
+        'Expected Commit B parent to still be Commit A after wholeBranch rebase',
+      );
+
+      const showCAfter = await repo.show(changeC);
+      assert.ok(
+        showCAfter.change.parentChangeIds.includes(changeB),
+        'Expected Commit C parent to still be Commit B after wholeBranch rebase',
+      );
+    });
   });
 
   suite('undo', () => {
