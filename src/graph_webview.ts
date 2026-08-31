@@ -321,23 +321,23 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         case 'fetchAndSyncToMain':
           try {
             const shortId = message.changeId.slice(0, 8);
+            const mainBookmark = getMainBookmark(
+              this.repository.repositoryRoot
+                ? vscode.Uri.file(this.repository.repositoryRoot)
+                : undefined,
+            );
             await vscode.window.withProgress(
               {
                 location: vscode.ProgressLocation.Notification,
-                title: `Fetching and syncing ${shortId} to main...`,
+                title: `Fetching and rebasing branch ${shortId} on ${mainBookmark}...`,
                 cancellable: false,
               },
               async () => {
                 await this.repository.gitFetch();
-                const mainBookmark = getMainBookmark(
-                  this.repository.repositoryRoot
-                    ? vscode.Uri.file(this.repository.repositoryRoot)
-                    : undefined,
-                );
                 await this.repository.rebaseRetryImmutable({
                   sourceRev: message.changeId,
                   destRev: mainBookmark,
-                  withDescendants: true,
+                  wholeBranch: true,
                 });
               },
             );
@@ -346,7 +346,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
             );
           } catch (error) {
             vscode.window.showErrorMessage(
-              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
+              `Failed to fetch and rebase branch${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
           break;
@@ -504,6 +504,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
       )
     `;
 
+    const scopeUri = this.repository.repositoryRoot
+      ? vscode.Uri.file(this.repository.repositoryRoot)
+      : undefined;
     const {
       useConfigLogRevset,
       revset,
@@ -513,7 +516,8 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
       showCommitId,
       showTimestamp,
       viewLayout,
-    } = getGraphConfig();
+    } = getGraphConfig(scopeUri);
+    const mainBookmark = getMainBookmark(scopeUri);
 
     // Collect all changes in a single pass (graph structure + data)
     const output = await this.repository.log(
@@ -538,6 +542,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
       showCommitId,
       showTimestamp,
       viewLayout,
+      mainBookmark,
     });
   }
 

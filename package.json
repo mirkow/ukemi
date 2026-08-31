@@ -250,7 +250,7 @@
       },
       {
         "command": "jj.fetchAndSyncToMain",
-        "title": "Fetch and sync to main",
+        "title": "Fetch and rebase branch on main",
         "category": "Jujutsu",
         "icon": "$(sync)"
       },

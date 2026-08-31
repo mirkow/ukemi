@@ -1681,29 +1681,29 @@ export async function activate(context: vscode.ExtensionContext) {
           const sourceShortId = sourceChangeId.slice(0, 8);
 
           try {
+            const mainBookmark = getMainBookmark(
+              repository.repositoryRoot
+                ? vscode.Uri.file(repository.repositoryRoot)
+                : undefined,
+            );
             await vscode.window.withProgress(
               {
                 location: vscode.ProgressLocation.Notification,
-                title: `Fetching and syncing ${sourceShortId} to main...`,
+                title: `Fetching and rebasing branch ${sourceShortId} on ${mainBookmark}...`,
                 cancellable: false,
               },
               async () => {
                 await repository.gitFetch();
-                const mainBookmark = getMainBookmark(
-                  repository.repositoryRoot
-                    ? vscode.Uri.file(repository.repositoryRoot)
-                    : undefined,
-                );
                 await repository.rebaseRetryImmutable({
                   sourceRev: sourceChangeId,
                   destRev: mainBookmark,
-                  withDescendants: true,
+                  wholeBranch: true,
                 });
               },
             );
           } catch (error) {
             vscode.window.showErrorMessage(
-              `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
+              `Failed to fetch and rebase branch${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
         }),
