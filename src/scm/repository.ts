@@ -117,6 +117,9 @@ export class RepositorySourceControlManager {
     });
     if (this.operationId !== latestOperationId) {
       this.operationId = latestOperationId;
+      this.fileSystemProvider.onDidChangeRepository({
+        repositoryRoot: this.repositoryRoot,
+      });
       const status = await this.repository.status({ noIntegrate: true });
 
       await this.updateState(status);

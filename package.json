@@ -4,7 +4,7 @@
   "publisher": "sbarfurth",
   "description": "VSCode extension for the Jujutsu (jj) version control system",
   "icon": "images/logo.png",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "engines": {
     "vscode": "^1.96.0",
     "node": ">=22.17.0"
@@ -286,6 +286,18 @@
         "command": "jj.copyPath",
         "title": "Copy Path",
         "category": "Jujutsu"
+      },
+      {
+        "command": "jj.setBookmark",
+        "title": "Set bookmark...",
+        "category": "Jujutsu",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "jj.gitPushBookmark",
+        "title": "Push bookmark...",
+        "category": "Jujutsu",
+        "icon": "$(cloud-upload)"
       }
     ],
     "menus": {
@@ -405,6 +417,16 @@
           "group": "2_item_action@0"
         },
         {
+          "command": "jj.setBookmark",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
+          "group": "2_item_action@01"
+        },
+        {
+          "command": "jj.gitPushBookmark",
+          "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup && viewItem =~ /hasBookmark/",
+          "group": "2_item_action@02"
+        },
+        {
           "command": "jj.rebaseIncludingDescendants",
           "when": "view == jjGraph && viewItem != commitFile && viewItem != commitFilesGroup",
           "group": "2_item_action@1"
@@ -431,7 +453,7 @@
         },
         {
           "command": "jj.abandon",
-          "when": "view == jjGraph && viewItem == mutable",
+          "when": "view == jjGraph && viewItem =~ /mutable/",
           "group": "2_item_action@6"
         },
         {
@@ -441,7 +463,7 @@
         },
         {
           "command": "jj.abandon",
-          "when": "view == jjGraph && viewItem == mutable",
+          "when": "view == jjGraph && viewItem =~ /mutable/",
           "group": "inline@2"
         },
         {

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import type { JJRepository } from './jj/repository';
 import type { ChangeWithDetails } from './jj/types';
+import type { WorkspaceSourceControlManager } from './scm/workspace';
 import path from 'path';
 import { getGraphConfig, getMainBookmark } from './config';
 import { toJJUri } from './uri';
@@ -65,6 +66,15 @@ type Message =
   | {
       command: 'describeChange';
       changeId: string;
+    }
+  | {
+      command: 'setBookmark';
+      changeId: string;
+    }
+  | {
+      command: 'pushBookmark';
+      changeId: string;
+      bookmarks?: string[];
     };
 
 export class ChangeNode {
@@ -101,6 +111,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     repo: JJRepository,
     private readonly context: vscode.ExtensionContext,
+    private readonly workspaceSCM?: WorkspaceSourceControlManager,
   ) {
     this.repository = repo;
 
@@ -159,6 +170,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               async () => {
                 await this.repository.editRetryImmutable(message.changeId);
               },
+            );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
             );
           } catch (error: unknown) {
             vscode.window.showErrorMessage(
@@ -256,6 +270,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         case 'newChange':
           try {
             await this.repository.new(undefined, [message.changeId]);
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to create new change${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -266,14 +283,20 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
           try {
             const shortId = message.changeId.slice(0, 8);
             let desc = message.description
-              ? message.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+              ? message.description
+                  .replace(/^\(empty\)\s*/, '')
+                  .split('\n')[0]
+                  .trim()
               : '';
             if (!desc) {
               const showResult = await this.repository
                 .show(message.changeId)
                 .catch(() => undefined);
               desc = showResult?.change.description
-                ? showResult.change.description.replace(/^\(empty\)\s*/, '').split('\n')[0].trim()
+                ? showResult.change.description
+                    .replace(/^\(empty\)\s*/, '')
+                    .split('\n')[0]
+                    .trim()
                 : '';
             }
             const descText = desc ? ` "${desc}"` : '';
@@ -286,6 +309,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               break;
             }
             await this.repository.abandon(message.changeId);
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to abandon change${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -315,6 +341,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
                 });
               },
             );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to fetch and sync to main${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -336,6 +365,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               message.changeId,
               input,
             );
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to update description${error instanceof Error ? `: ${error.message}` : ''}`,
@@ -350,7 +382,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
 
             const changes: ChangeWithDetails[] = await this.repository
               .getChanges(['all()'], { noIntegrate: true, limit: 200 })
-              .catch(() => this.repository.getChanges([], { noIntegrate: true }));
+              .catch(() =>
+                this.repository.getChanges([], { noIntegrate: true }),
+              );
 
             const candidateChanges = changes.filter(
               (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
@@ -401,11 +435,29 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
               destRev: selection.changeId,
               withDescendants,
             });
+            await this.workspaceSCM?.checkForUpdates(
+              this.repository.repositoryRoot,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to rebase change${error instanceof Error ? `: ${error.message}` : ''}`,
             );
           }
+          break;
+        case 'setBookmark':
+          await promptSetBookmark(
+            this.repository,
+            message.changeId,
+            this.workspaceSCM,
+          );
+          break;
+        case 'pushBookmark':
+          await promptPushBookmark(
+            this.repository,
+            message.changeId,
+            message.bookmarks,
+            this.workspaceSCM,
+          );
           break;
       }
     });
@@ -651,4 +703,188 @@ export function parseJJLog(output: string): ChangeNode[] {
     );
   }
   return changeNodes;
+}
+
+export async function promptSetBookmark(
+  repository: JJRepository,
+  changeId: string,
+  workspaceSCM?: WorkspaceSourceControlManager,
+): Promise<void> {
+  const shortId = changeId.slice(0, 8);
+  const existingBookmarks = await repository.listBookmarks();
+
+  interface BookmarkQuickPickItem extends vscode.QuickPickItem {
+    bookmarkName: string;
+    isCreateNew?: boolean;
+  }
+
+  const quickPick = vscode.window.createQuickPick<BookmarkQuickPickItem>();
+  quickPick.title = `Set Bookmark on ${shortId}`;
+  quickPick.placeholder =
+    'Select an existing bookmark or type a new bookmark name...';
+  quickPick.matchOnDescription = true;
+
+  function updateItems(value: string) {
+    const trimmed = value.trim();
+    const items: BookmarkQuickPickItem[] = [];
+
+    if (trimmed && !existingBookmarks.includes(trimmed)) {
+      items.push({
+        label: `$(plus) Create new bookmark "${trimmed}"`,
+        description: 'New bookmark',
+        alwaysShow: true,
+        bookmarkName: trimmed,
+        isCreateNew: true,
+      });
+    }
+
+    for (const b of existingBookmarks) {
+      items.push({
+        label: `$(bookmark) ${b}`,
+        description: 'Existing bookmark',
+        bookmarkName: b,
+      });
+    }
+
+    quickPick.items = items;
+  }
+
+  updateItems('');
+
+  quickPick.onDidChangeValue((value) => {
+    updateItems(value);
+  });
+
+  const selected = await new Promise<string | undefined>((resolve) => {
+    quickPick.onDidAccept(() => {
+      const selectedItem = quickPick.selectedItems[0];
+      const name = selectedItem
+        ? selectedItem.bookmarkName
+        : quickPick.value.trim();
+      quickPick.hide();
+      resolve(name || undefined);
+    });
+    quickPick.onDidHide(() => {
+      quickPick.dispose();
+      resolve(undefined);
+    });
+    quickPick.show();
+  });
+
+  if (!selected) {
+    return;
+  }
+
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Setting bookmark "${selected}" on ${shortId}...`,
+      },
+      async () => {
+        await repository.setBookmark(selected, changeId);
+        await workspaceSCM?.checkForUpdates(repository.repositoryRoot);
+      },
+    );
+    vscode.window.showInformationMessage(
+      `Bookmark "${selected}" set on ${shortId}.`,
+    );
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Failed to set bookmark${error instanceof Error ? `: ${error.message}` : ''}`,
+    );
+  }
+}
+
+export async function promptPushBookmark(
+  repository: JJRepository,
+  changeId: string,
+  bookmarks?: string[],
+  workspaceSCM?: WorkspaceSourceControlManager,
+): Promise<void> {
+  const shortId = changeId.slice(0, 8);
+  let availableBookmarks = bookmarks;
+
+  if (!availableBookmarks || availableBookmarks.length === 0) {
+    const showResult = await repository.show(changeId).catch(() => undefined);
+    availableBookmarks = showResult?.change.bookmarks;
+  }
+
+  if (!availableBookmarks || availableBookmarks.length === 0) {
+    vscode.window.showWarningMessage(
+      `Commit ${shortId} has no associated bookmarks to push.`,
+    );
+    return;
+  }
+
+  let bookmarkToPush: string | undefined;
+  let pushAll = false;
+
+  if (availableBookmarks.length === 1) {
+    bookmarkToPush = availableBookmarks[0];
+  } else {
+    interface PushQuickPickItem extends vscode.QuickPickItem {
+      bookmarkName?: string;
+      pushAll?: boolean;
+    }
+
+    const items: PushQuickPickItem[] = [
+      {
+        label: `$(cloud-upload) Push all bookmarks on this commit`,
+        description: availableBookmarks.join(', '),
+        pushAll: true,
+      },
+      ...availableBookmarks.map((b) => ({
+        label: `$(bookmark) ${b}`,
+        description: 'Bookmark on this commit',
+        bookmarkName: b,
+      })),
+    ];
+
+    const selection = await vscode.window.showQuickPick(items, {
+      title: `Push bookmark from ${shortId}...`,
+      placeHolder: 'Select bookmark to push to remote...',
+    });
+
+    if (!selection) {
+      return;
+    }
+
+    if (selection.pushAll) {
+      pushAll = true;
+    } else {
+      bookmarkToPush = selection.bookmarkName;
+    }
+  }
+
+  const title = pushAll
+    ? `Pushing all bookmarks (${availableBookmarks.join(', ')}) to remote...`
+    : `Pushing bookmark "${bookmarkToPush}" to remote...`;
+
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title,
+        cancellable: false,
+      },
+      async () => {
+        if (pushAll) {
+          for (const b of availableBookmarks) {
+            await repository.gitPush(b);
+          }
+        } else if (bookmarkToPush) {
+          await repository.gitPush(bookmarkToPush);
+        }
+        await workspaceSCM?.checkForUpdates(repository.repositoryRoot);
+      },
+    );
+    vscode.window.showInformationMessage(
+      `Successfully pushed ${pushAll ? 'all bookmarks' : `bookmark "${bookmarkToPush}"`} to remote.`,
+    );
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Failed to push bookmark${error instanceof Error ? `: ${error.message}` : ''}`,
+    );
+  }
 }

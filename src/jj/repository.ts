@@ -1121,6 +1121,79 @@ export class JJRepository {
     return this.gitFetchPromise;
   }
 
+  async listBookmarks(): Promise<string[]> {
+    const args = [
+      'log',
+      '--no-graph',
+      '-r',
+      'bookmarks()',
+      '-T',
+      'bookmarks.map(|b| b.name()).join("\\n") ++ "\\n"',
+    ];
+    if (this.jjVersion.isAtLeast(SemVer.parse('0.41.0'))) {
+      args.unshift('--no-integrate-operation');
+    }
+    try {
+      const output = (
+        await handleJJCommand(
+          this.spawnJJ(args, {
+            timeout: 5000,
+            cwd: this.repositoryRoot,
+          }),
+        )
+      ).toString();
+      return Array.from(
+        new Set(
+          output
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean),
+        ),
+      );
+    } catch (error) {
+      getLogger().error(`Failed to list bookmarks: ${String(error)}`);
+      return [];
+    }
+  }
+
+  async setBookmark(bookmarkName: string, changeId: string): Promise<void> {
+    const bookmarkCmd = this.jjVersion.isAtLeast(SemVer.parse('0.19.0'))
+      ? 'bookmark'
+      : 'branch';
+    const args = [
+      bookmarkCmd,
+      'set',
+      bookmarkName,
+      '-r',
+      changeId,
+      '--allow-backwards',
+    ];
+    await handleJJCommand(
+      this.spawnJJ(args, {
+        timeout: 5000,
+        cwd: this.repositoryRoot,
+      }),
+    );
+  }
+
+  async gitPush(bookmarkName?: string): Promise<string> {
+    const bookmarkOption = this.jjVersion.isAtLeast(SemVer.parse('0.19.0'))
+      ? '--bookmark'
+      : '--branch';
+    const args = ['git', 'push'];
+    if (bookmarkName) {
+      args.push(bookmarkOption, bookmarkName, '--allow-new');
+    }
+    return (
+      await handleJJCommand(
+        this.spawnJJ(args, {
+          timeout: 60_000,
+          cwd: this.repositoryRoot,
+        }),
+      )
+    ).toString();
+  }
+
   async annotate(filepath: string, rev: string): Promise<string[]> {
     const output = (
       await handleJJCommand(
