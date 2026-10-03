@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.0.16
+
+- Ensure rebase destination popup always includes mutable commits, their parents, working copy, and configured main branch bookmark alongside recent commits.
+- Add dynamic search in rebase destination popup: typing a change ID / revision pattern automatically queries and displays matching commits after a 0.5s debounce.
+- Fix bug where changed files and conflict statuses in the Source Control Graph did not refresh or display conflicted state.
+- Ensure conflicted files without working copy changes are displayed as conflicts in the status file list.
+
 ## 0.0.15
 
 - Fix commit file diffs in Source Control Graph and Commits tree view to compare directly against the parent revision rather than grandparent.
