@@ -94,6 +94,15 @@ export function pathEquals(a: string, b: string): boolean {
 }
 
 /**
+ * Converts a Windows extended-length UNC path (`\\?\UNC\server\share`), as
+ * printed by `jj root`, to the regular UNC form (`\\server\share`) used by
+ * VS Code.
+ */
+export function stripUNCPrefix(path: string): string {
+  return path.replace(/^\\\\\?\\UNC\\/, '\\\\');
+}
+
+/**
  * Creates a throttled version of an async function that ensures the underlying
  * function (`fn`) is called at most once concurrently.
  *

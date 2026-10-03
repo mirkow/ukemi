@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.17
+
+- Automatically close the built-in Git extension's repository for colocated Jujutsu repositories so only the Jujutsu source control UI is shown (configurable via `ukemi.autoCloseGitRepositories`; pure Git repositories are not affected).
+- Fix working copy changes not being shown (even after Refresh) when the initial status update failed, e.g. because `jj file list` timed out in large repositories during startup. Failed updates are now retried on the next poll.
+- Fix transient `jj version` failures re-initializing the repository with an assumed jj version of 0.28.0. The previously detected version is now kept and the failure is logged.
+
 ## 0.0.16
 
 - Ensure rebase destination popup always includes mutable commits, their parents, working copy, and configured main branch bookmark alongside recent commits.

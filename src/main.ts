@@ -34,6 +34,7 @@ import {
 } from './graph_tree_view';
 import { getConfig, getMainBookmark } from './config';
 import { getLogger } from './logger';
+import { GitRepositoryCloser, isAutoCloseGitEnabled } from './git_extension';
 
 export async function activate(context: vscode.ExtensionContext) {
   const logger = getLogger();
@@ -52,6 +53,21 @@ export async function activate(context: vscode.ExtensionContext) {
   const workspaceSCM = new WorkspaceSourceControlManager(decorationProvider);
   await workspaceSCM.refresh();
   context.subscriptions.push(workspaceSCM);
+
+  const gitRepositoryCloser = new GitRepositoryCloser();
+  context.subscriptions.push(gitRepositoryCloser);
+  /**
+   * Closes the Git extension's repositories for the current jj repositories.
+   * Runs in the background so activation isn't blocked by the Git extension.
+   */
+  function closeGitRepos() {
+    gitRepositoryCloser
+      .closeGitReposForJJRepos(
+        workspaceSCM.repoSCMs.map((repoSCM) => repoSCM.repositoryRoot),
+      )
+      .catch((e) => logger.error(`Failed to close Git repositories: ${e}`));
+  }
+  closeGitRepos();
 
   let checkReposFunction: (specificFolders?: string[]) => Promise<void>;
 
@@ -92,6 +108,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const didUpdate = await workspaceSCM.refresh();
       if (didUpdate) {
         setSelectedRepo(getSelectedRepo());
+        closeGitRepos();
       }
       await checkReposFunction();
     },
@@ -111,6 +128,11 @@ export async function activate(context: vscode.ExtensionContext) {
       if (affectedFolders.length > 0) {
         await checkReposFunction(affectedFolders);
       }
+    }
+    if (e.affectsConfiguration('ukemi.autoCloseGitRepositories')) {
+      logger.info('Auto-close Git repositories configuration changed');
+      closeGitRepos();
+      await checkReposFunction();
     }
   });
 
@@ -1801,6 +1823,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const didUpdate = await workspaceSCM.refresh();
     if (didUpdate) {
       setSelectedRepo(getSelectedRepo());
+      closeGitRepos();
     }
     if (workspaceSCM.repoSCMs.length > 0) {
       vscode.commands.executeCommand('setContext', 'jj.reposExist', true);
@@ -1881,7 +1904,11 @@ export async function activate(context: vscode.ExtensionContext) {
             .getConfiguration('git', vscode.Uri.file(repoRoot))
             .get('enabled');
 
-          if (isGitEnabled) {
+          // Warn about the colocated repo only if the Git extension is enabled
+          // and `ukemi.autoCloseGitRepositories` is off. With auto-close on,
+          // ukemi already closes this repo in the Git extension (see
+          // GitRepositoryCloser), so there is nothing for the user to fix.
+          if (isGitEnabled && !isAutoCloseGitEnabled(repoRoot)) {
             colocatedRepos.push(repoRoot);
             reposWithWarnings.add(repoRoot);
           } else {

@@ -13,6 +13,7 @@ import {
 import { getLogger } from '../logger';
 import { extensionDir } from '../env';
 import { RepositorySourceControlManager } from './repository';
+import { stripUNCPrefix } from '../utils';
 
 export class WorkspaceSourceControlManager {
   repoInfos:
@@ -54,6 +55,28 @@ export class WorkspaceSourceControlManager {
     );
   }
 
+  /**
+   * Returns the jj version to use for `repoUri` when `jj version` failed.
+   *
+   * Reuses the version previously detected for the same repo and jj binary, so
+   * that a transient failure does not re-initialize the repo with a guessed
+   * version. Only if no earlier version is known, the default version is used.
+   */
+  private getFallbackJJVersion(repoUri: string, jjPath: string): SemVer {
+    const previous = this.repoInfos?.get(repoUri);
+    if (previous && previous.jjPath.filepath === jjPath) {
+      getLogger().info(
+        `Keeping previously detected jj version ${previous.jjVersion.toString()} for ${repoUri}.`,
+      );
+      return previous.jjVersion;
+    }
+    const fallback = SemVer.default();
+    getLogger().warn(
+      `Assuming jj version ${fallback.toString()} for ${repoUri}, since the actual version could not be determined.`,
+    );
+    return fallback;
+  }
+
   async refresh() {
     const newRepoInfos = new Map<
       string,
@@ -67,8 +90,6 @@ export class WorkspaceSourceControlManager {
     for (const workspaceFolder of vscode.workspace.workspaceFolders || []) {
       try {
         const jjPath = await getJJPath(workspaceFolder.uri.fsPath);
-        const jjVersion = await getJJVersion(jjPath.filepath);
-        const jjConfigArgs = await getConfigArgs(extensionDir, jjVersion);
 
         const repoRoot = (
           await handleCommand(
@@ -81,11 +102,13 @@ export class WorkspaceSourceControlManager {
           .toString()
           .trim();
 
-        const repoUri = vscode.Uri.file(
-          repoRoot.replace(/^\\\\\?\\UNC\\/, '\\\\'),
-        ).toString();
+        const repoUri = vscode.Uri.file(stripUNCPrefix(repoRoot)).toString();
 
         if (!newRepoInfos.has(repoUri)) {
+          const jjVersion =
+            (await getJJVersion(jjPath.filepath)) ??
+            this.getFallbackJJVersion(repoUri, jjPath.filepath);
+          const jjConfigArgs = await getConfigArgs(extensionDir, jjVersion);
           newRepoInfos.set(repoUri, {
             jjPath,
             jjVersion,

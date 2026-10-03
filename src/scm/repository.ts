@@ -116,7 +116,6 @@ export class RepositorySourceControlManager {
       noIntegrate: true,
     });
     if (this.operationId !== latestOperationId) {
-      this.operationId = latestOperationId;
       this.fileSystemProvider.onDidChangeRepository({
         repositoryRoot: this.repositoryRoot,
       });
@@ -124,6 +123,11 @@ export class RepositorySourceControlManager {
 
       await this.updateState(status);
       this.render();
+
+      // Only remember the operation once the state was rendered successfully.
+      // Otherwise a failed update (e.g. a jj command timing out) would never be
+      // retried, because the next poll/refresh would see an unchanged operation.
+      this.operationId = latestOperationId;
 
       this._onDidUpdate.fire(undefined);
     }

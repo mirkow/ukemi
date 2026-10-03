@@ -9,9 +9,19 @@ import { SemVer } from '../semver';
 import { getConfig } from '../config';
 import { getLogger } from '../logger';
 
-export async function getJJVersion(jjPath: string): Promise<SemVer> {
+/**
+ * Determines the version of the jj executable at `jjPath` via `jj version`.
+ *
+ * Returns `undefined` and logs a warning with the cause if the version could
+ * not be determined, so that callers can choose an appropriate fallback instead
+ * of silently assuming a version.
+ */
+export async function getJJVersion(
+  jjPath: string,
+): Promise<SemVer | undefined> {
+  let version: string;
   try {
-    const version = (
+    version = (
       await handleCommand(
         spawn(jjPath, ['version'], {
           timeout: 5000,
@@ -20,14 +30,20 @@ export async function getJJVersion(jjPath: string): Promise<SemVer> {
     )
       .toString()
       .trim();
-
-    if (version.startsWith('jj')) {
-      return SemVer.parse(version);
-    }
-  } catch {
-    // Assume the version
+  } catch (e) {
+    getLogger().warn(
+      `Failed to determine jj version of ${jjPath}: ${String(e)}`,
+    );
+    return undefined;
   }
-  return SemVer.default();
+
+  if (!version.startsWith('jj')) {
+    getLogger().warn(
+      `Unexpected output of '${jjPath} version': ${JSON.stringify(version)}`,
+    );
+    return undefined;
+  }
+  return SemVer.parse(version);
 }
 
 export async function getConfigArgs(
