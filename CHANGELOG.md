@@ -5,6 +5,9 @@
 - Automatically close the built-in Git extension's repository for colocated Jujutsu repositories so only the Jujutsu source control UI is shown (configurable via `ukemi.autoCloseGitRepositories`; pure Git repositories are not affected).
 - Fix working copy changes not being shown (even after Refresh) when the initial status update failed, e.g. because `jj file list` timed out in large repositories during startup. Failed updates are now retried on the next poll.
 - Fix transient `jj version` failures re-initializing the repository with an assumed jj version of 0.28.0. The previously detected version is now kept and the failure is logged.
+- Fix the jj source control UI being torn down (and the Git extension taking over) when `jj root` fails transiently, e.g. with `ENOENT` right after an SSH reconnect. The previously detected repository is now kept and the failure is logged; only a "no jj repo" error removes it.
+- Fix a close/reopen loop with the built-in Git extension when a closed repository is reopened (via `Git: Reopen Closed Repositories` or by another extension). ukemi now closes each Git repository only once per detected Jujutsu repository and leaves it open if it is reopened.
+- Fix `Cannot read properties of undefined (reading 'repository')` errors in the background poll when the last Jujutsu repository is no longer detected (e.g. after its workspace folder was removed).
 
 ## 0.0.16
 

@@ -662,7 +662,7 @@
         "ukemi.autoCloseGitRepositories": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "When enabled, ukemi closes the built-in Git extension's repository for folders that are Jujutsu repositories, so only the Jujutsu source control UI is shown. Pure Git repositories are not affected. To undo, disable this setting and run `Git: Reopen Closed Repositories`.",
+          "markdownDescription": "When enabled, ukemi closes the built-in Git extension's repository for folders that are Jujutsu repositories, so only the Jujutsu source control UI is shown. Pure Git repositories are not affected. ukemi closes each repository only once per detected Jujutsu repository: if you reopen it via `Git: Reopen Closed Repositories` (or another extension reopens it), it stays open until the Jujutsu repository is detected again (e.g. after it was removed from the workspace) or VS Code is restarted. To keep Git repositories open permanently, disable this setting.",
           "scope": "resource"
         },
         "ukemi.commandTimeout": {

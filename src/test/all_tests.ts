@@ -6,3 +6,4 @@ import './jj/repository_test';
 import './fakeeditor_test';
 import './graph_tree_view_test';
 import './git_extension_test';
+import './workspace_test';

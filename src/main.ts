@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // Check for colocated repositories and warn about Git extension
   await checkColocatedRepositories(workspaceSCM, context);
 
-  const _onDidSetSelectedRepository = new vscode.EventEmitter<void>();
+  const _onDidSetSelectedRepository = new vscode.EventEmitter<JJRepository>();
   const onDidSetSelectedRepository = _onDidSetSelectedRepository.event;
 
   function setSelectedRepo(repository: JJRepository): void {
@@ -82,24 +82,31 @@ export async function activate(context: vscode.ExtensionContext) {
       'selectedRepository',
       repository.repositoryRoot,
     );
-    _onDidSetSelectedRepository.fire();
+    _onDidSetSelectedRepository.fire(repository);
   }
 
-  function getSelectedRepo(): JJRepository {
+  /**
+   * Returns the stored selected repo, falling back to the first repo if it is
+   * no longer known. Returns undefined if there is no jj repo at all.
+   */
+  function getSelectedRepo(): JJRepository | undefined {
     const selectedRepo =
       context.workspaceState.get<string>('selectedRepository');
-    let repository: JJRepository;
+    return (
+      workspaceSCM.repoSCMs.find((repo) => repo.repositoryRoot === selectedRepo)
+        ?.repository ?? workspaceSCM.repoSCMs[0]?.repository
+    );
+  }
 
+  /**
+   * Re-applies the selected repo after the set of repos changed, so that views
+   * switch away from repos that no longer exist. Does nothing without repos.
+   */
+  function reselectRepo(): void {
+    const selectedRepo = getSelectedRepo();
     if (selectedRepo) {
-      repository =
-        workspaceSCM.repoSCMs.find(
-          (repo) => repo.repositoryRoot === selectedRepo,
-        )?.repository || workspaceSCM.repoSCMs[0].repository;
-    } else {
-      repository = workspaceSCM.repoSCMs[0].repository;
+      setSelectedRepo(selectedRepo);
     }
-
-    return repository;
   }
 
   vscode.workspace.onDidChangeWorkspaceFolders(
@@ -107,7 +114,7 @@ export async function activate(context: vscode.ExtensionContext) {
       logger.info('Workspace folders changed');
       const didUpdate = await workspaceSCM.refresh();
       if (didUpdate) {
-        setSelectedRepo(getSelectedRepo());
+        reselectRepo();
         closeGitRepos();
       }
       await checkReposFunction();
@@ -131,14 +138,16 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     if (e.affectsConfiguration('ukemi.autoCloseGitRepositories')) {
       logger.info('Auto-close Git repositories configuration changed');
+      // Turning the setting (back) on should close all jj repos in the Git
+      // extension again, including ones the user reopened earlier.
+      gitRepositoryCloser.resetClosedRoots();
       closeGitRepos();
       await checkReposFunction();
     }
   });
 
   let isInitialized = false;
-  function init() {
-    const initialSelectedRepo = getSelectedRepo();
+  function init(initialSelectedRepo: JJRepository) {
     const graphWebview = new JJGraphWebview(
       context.extensionUri,
       initialSelectedRepo,
@@ -164,8 +173,7 @@ export async function activate(context: vscode.ExtensionContext) {
       operationLogManager,
     );
     onDidSetSelectedRepository(
-      async () => {
-        const selectedRepo = getSelectedRepo();
+      async (selectedRepo) => {
         await Promise.all([
           graphWebview.setSelectedRepository(selectedRepo),
           graphTreeView.setSelectedRepo(selectedRepo),
@@ -1822,13 +1830,14 @@ export async function activate(context: vscode.ExtensionContext) {
   async function poll() {
     const didUpdate = await workspaceSCM.refresh();
     if (didUpdate) {
-      setSelectedRepo(getSelectedRepo());
+      reselectRepo();
       closeGitRepos();
     }
-    if (workspaceSCM.repoSCMs.length > 0) {
+    const selectedRepo = getSelectedRepo();
+    if (selectedRepo) {
       vscode.commands.executeCommand('setContext', 'jj.reposExist', true);
       if (!isInitialized) {
-        init();
+        init(selectedRepo);
       }
     } else {
       vscode.commands.executeCommand('setContext', 'jj.reposExist', false);

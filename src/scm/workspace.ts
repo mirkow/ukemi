@@ -13,20 +13,34 @@ import {
 import { getLogger } from '../logger';
 import { extensionDir } from '../env';
 import { RepositorySourceControlManager } from './repository';
-import { stripUNCPrefix } from '../utils';
+import { isDescendant, stripUNCPrefix } from '../utils';
+
+/** Information about a jj repository detected in the workspace. */
+type RepoInfo = {
+  jjPath: Awaited<ReturnType<typeof getJJPath>>;
+  jjVersion: SemVer;
+  jjConfigArgs: string[];
+  /** Repository root as printed by `jj root`. */
+  repoRoot: string;
+};
+
+/**
+ * Returns the entries of `repoInfos` (keyed by repo URI) whose repository
+ * contains `folderPath`, i.e. whose root equals `folderPath` or is one of its
+ * ancestors. `jj root` walks up from the workspace folder, so these are the
+ * repos that were detected for `folderPath`.
+ */
+export function getRepoInfosContainingFolder<T extends { repoRoot: string }>(
+  repoInfos: Map<string, T> | undefined,
+  folderPath: string,
+): [string, T][] {
+  return [...(repoInfos?.entries() ?? [])].filter(([, { repoRoot }]) =>
+    isDescendant(stripUNCPrefix(repoRoot), folderPath),
+  );
+}
 
 export class WorkspaceSourceControlManager {
-  repoInfos:
-    | Map<
-        string,
-        {
-          jjPath: Awaited<ReturnType<typeof getJJPath>>;
-          jjVersion: SemVer;
-          jjConfigArgs: string[];
-          repoRoot: string;
-        }
-      >
-    | undefined;
+  repoInfos: Map<string, RepoInfo> | undefined;
   repoSCMs: RepositorySourceControlManager[] = [];
   subscriptions: {
     dispose(): unknown;
@@ -77,57 +91,78 @@ export class WorkspaceSourceControlManager {
     return fallback;
   }
 
-  async refresh() {
-    const newRepoInfos = new Map<
-      string,
-      {
-        jjPath: Awaited<ReturnType<typeof getJJPath>>;
-        jjVersion: SemVer;
-        jjConfigArgs: string[];
-        repoRoot: string;
-      }
-    >();
-    for (const workspaceFolder of vscode.workspace.workspaceFolders || []) {
-      try {
-        const jjPath = await getJJPath(workspaceFolder.uri.fsPath);
+  /**
+   * Detects the jj repo containing `folderPath` and adds it to `newRepoInfos`
+   * (unless another workspace folder already added the same repo). Throws if
+   * `jj root` fails, including when `folderPath` is not in a jj repo.
+   */
+  private async detectRepoInfo(
+    folderPath: string,
+    newRepoInfos: Map<string, RepoInfo>,
+  ): Promise<void> {
+    const jjPath = await getJJPath(folderPath);
 
-        const repoRoot = (
-          await handleCommand(
-            spawnJJ(jjPath.filepath, ['root'], {
-              timeout: 5000,
-              cwd: workspaceFolder.uri.fsPath,
-            }),
-          )
-        )
-          .toString()
-          .trim();
+    const repoRoot = (
+      await handleCommand(
+        spawnJJ(jjPath.filepath, ['root'], {
+          timeout: 5000,
+          cwd: folderPath,
+        }),
+      )
+    )
+      .toString()
+      .trim();
 
-        const repoUri = vscode.Uri.file(stripUNCPrefix(repoRoot)).toString();
+    const repoUri = vscode.Uri.file(stripUNCPrefix(repoRoot)).toString();
+    if (newRepoInfos.has(repoUri)) {
+      return;
+    }
+    const jjVersion =
+      (await getJJVersion(jjPath.filepath)) ??
+      this.getFallbackJJVersion(repoUri, jjPath.filepath);
+    const jjConfigArgs = await getConfigArgs(extensionDir, jjVersion);
+    newRepoInfos.set(repoUri, {
+      jjPath,
+      jjVersion,
+      jjConfigArgs,
+      repoRoot,
+    });
+  }
 
-        if (!newRepoInfos.has(repoUri)) {
-          const jjVersion =
-            (await getJJVersion(jjPath.filepath)) ??
-            this.getFallbackJJVersion(repoUri, jjPath.filepath);
-          const jjConfigArgs = await getConfigArgs(extensionDir, jjVersion);
-          newRepoInfos.set(repoUri, {
-            jjPath,
-            jjVersion,
-            jjConfigArgs,
-            repoRoot,
-          });
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('no jj repo in')) {
-          getLogger().debug(`No jj repo in ${workspaceFolder.uri.fsPath}`);
-        } else {
-          getLogger().error(
-            `Error while initializing ukemi in workspace ${workspaceFolder.uri.fsPath}: ${String(e)}`,
-          );
-        }
-        continue;
+  /**
+   * Handles a failed repo detection for `folderPath`. If the folder is not in
+   * a jj repo, nothing is added to `newRepoInfos`. Any other error (e.g. a
+   * transient spawn failure after an SSH reconnect) is logged and the repos
+   * previously detected for `folderPath` are carried over unchanged, so that
+   * they are not torn down and re-initialized.
+   */
+  private handleDetectRepoInfoError(
+    folderPath: string,
+    error: unknown,
+    newRepoInfos: Map<string, RepoInfo>,
+  ): void {
+    if (error instanceof Error && error.message.includes('no jj repo in')) {
+      getLogger().debug(`No jj repo in ${folderPath}`);
+      return;
+    }
+    getLogger().error(
+      `Error while initializing ukemi in workspace ${folderPath}: ${String(error)}. Keeping the previous state of this workspace folder.`,
+    );
+    for (const [repoUri, repoInfo] of getRepoInfosContainingFolder(
+      this.repoInfos,
+      folderPath,
+    )) {
+      if (!newRepoInfos.has(repoUri)) {
+        newRepoInfos.set(repoUri, repoInfo);
       }
     }
+  }
 
+  /**
+   * Returns whether `newRepoInfos` differs from the currently known repos in a
+   * way that requires re-initializing the repository source control managers.
+   */
+  private isAnyRepoChanged(newRepoInfos: Map<string, RepoInfo>): boolean {
     let isAnyRepoChanged = false;
     for (const [key, value] of newRepoInfos) {
       const oldValue = this.repoInfos?.get(key);
@@ -152,6 +187,21 @@ export class WorkspaceSourceControlManager {
         getLogger().info(`Detected jj repo removal in workspace: ${key}`);
       }
     }
+    return isAnyRepoChanged;
+  }
+
+  async refresh() {
+    const newRepoInfos = new Map<string, RepoInfo>();
+    for (const workspaceFolder of vscode.workspace.workspaceFolders || []) {
+      const folderPath = workspaceFolder.uri.fsPath;
+      try {
+        await this.detectRepoInfo(folderPath, newRepoInfos);
+      } catch (e) {
+        this.handleDetectRepoInfoError(folderPath, e, newRepoInfos);
+      }
+    }
+
+    const isAnyRepoChanged = this.isAnyRepoChanged(newRepoInfos);
     this.repoInfos = newRepoInfos;
 
     if (isAnyRepoChanged) {

@@ -75,16 +75,31 @@ export class GitRepositoryCloser implements vscode.Disposable {
   private openRepoListener: vscode.Disposable | undefined;
   /** Git roots for which a `git.close` call is in flight. */
   private closingRoots = new Set<string>();
+  /**
+   * Git roots that ukemi already closed, mapped to the root of the jj repo
+   * they were closed for. Each root is closed only once per detected jj repo:
+   * if it is reopened afterwards (via `Git: Reopen Closed Repositories` or
+   * another extension calling the Git API's `openRepository`), it is left
+   * open instead of fighting over it. Entries are dropped when their jj repo
+   * is no longer detected, so a re-detected jj repo is closed again.
+   */
+  private closedRoots = new Map<string, string>();
   private subscriptions: vscode.Disposable[] = [];
 
   /**
    * Sets the current jj repository roots and closes every matching repository
-   * in the Git extension for which `ukemi.autoCloseGitRepositories` is enabled.
-   * Repositories the Git extension opens later (e.g. while it is still
-   * initializing) are handled by the `onDidOpenRepository` listener.
+   * in the Git extension for which `ukemi.autoCloseGitRepositories` is enabled
+   * and that ukemi did not close before. Repositories the Git extension opens
+   * later (e.g. while it is still initializing) are handled by the
+   * `onDidOpenRepository` listener.
    */
   async closeGitReposForJJRepos(jjRepoRoots: string[]): Promise<void> {
     this.jjRepoRoots = jjRepoRoots;
+    for (const [gitRoot, jjRoot] of this.closedRoots) {
+      if (!jjRepoRoots.includes(jjRoot)) {
+        this.closedRoots.delete(gitRoot);
+      }
+    }
     const gitExtension = await this.getGitExtension();
     if (!gitExtension?.enabled) {
       return;
@@ -95,7 +110,21 @@ export class GitRepositoryCloser implements vscode.Disposable {
     }
   }
 
-  /** Closes `repo` if its root is a known jj repository root. */
+  /**
+   * Forgets which Git roots ukemi already closed, so that the next
+   * `closeGitReposForJJRepos` call closes all matching repositories again,
+   * including ones the user reopened. Used when `ukemi.autoCloseGitRepositories`
+   * changes (so that turning the setting on again takes effect) and when the
+   * Git extension is re-enabled.
+   */
+  resetClosedRoots(): void {
+    this.closedRoots.clear();
+  }
+
+  /**
+   * Closes `repo` if its root is a known jj repository root and ukemi did not
+   * close it before.
+   */
   private async closeIfJJRepo(api: GitAPI, repo: GitRepository) {
     const gitRoot = repo.rootUri.fsPath;
     const jjRoot = await this.findJJRoot(gitRoot);
@@ -113,12 +142,20 @@ export class GitRepositoryCloser implements vscode.Disposable {
     if (this.closingRoots.has(gitRoot) || !isStillOpen) {
       return;
     }
+    // The repo is open although ukemi closed it before, i.e. it was reopened.
+    if (this.closedRoots.has(gitRoot)) {
+      getLogger().info(
+        `Git extension repository ${gitRoot} was reopened; leaving it open (ukemi closes it only once per detected jj repo).`,
+      );
+      return;
+    }
     getLogger().info(
       `Closing Git extension repository for jj repo: ${gitRoot}`,
     );
     this.closingRoots.add(gitRoot);
     try {
       await vscode.commands.executeCommand('git.close', repo);
+      this.closedRoots.set(gitRoot, jjRoot);
     } finally {
       this.closingRoots.delete(gitRoot);
     }
@@ -153,6 +190,9 @@ export class GitRepositoryCloser implements vscode.Disposable {
       gitExtension.onDidChangeEnablement((enabled) => {
         this.listenForOpenedRepos(gitExtension, enabled);
         if (enabled) {
+          // The re-enabled Git extension opens its repositories from scratch,
+          // so the earlier closes no longer apply.
+          this.resetClosedRoots();
           this.closeGitReposForJJRepos(this.jjRepoRoots).catch((e) =>
             getLogger().error(`Failed to close Git repositories: ${e}`),
           );
