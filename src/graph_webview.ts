@@ -377,62 +377,20 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         case 'rebaseChange':
           try {
             const sourceChangeId = message.changeId;
-            const sourceShortId = sourceChangeId.substring(0, 8);
             const withDescendants = message.withDescendants !== false;
 
-            const changes: ChangeWithDetails[] = await this.repository
-              .getChanges(['all()'], { noIntegrate: true, limit: 200 })
-              .catch(() =>
-                this.repository.getChanges([], { noIntegrate: true }),
-              );
-
-            const candidateChanges = changes.filter(
-              (change: ChangeWithDetails) => change.changeId !== sourceChangeId,
+            const destRev = await promptRebaseDestination(
+              this.repository,
+              sourceChangeId,
+              withDescendants,
             );
-
-            interface CommitQuickPickItem extends vscode.QuickPickItem {
-              changeId: string;
-            }
-
-            const items: CommitQuickPickItem[] = candidateChanges.map(
-              (change) => {
-                const shortChange = change.changeId.substring(0, 8);
-                const shortCommit = change.commitId.substring(0, 8);
-                const firstLine = change.description
-                  ? change.description.split('\n')[0]
-                  : '(no description)';
-                const bookmarkStr =
-                  change.bookmarks.length > 0
-                    ? ` [${change.bookmarks.join(', ')}]`
-                    : '';
-                return {
-                  label: `$(git-commit) ${firstLine}`,
-                  description: `${shortChange}${bookmarkStr} (${shortCommit})`,
-                  detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
-                  changeId: change.changeId,
-                };
-              },
-            );
-
-            const title = withDescendants
-              ? `Rebase ${sourceShortId} (including descendants) onto...`
-              : `Rebase ${sourceShortId} (without descendants) onto...`;
-
-            const selection = await vscode.window.showQuickPick(items, {
-              title,
-              placeHolder:
-                'Select destination commit (search description, commit ID, change ID, bookmarks)...',
-              matchOnDescription: true,
-              matchOnDetail: true,
-            });
-
-            if (!selection) {
+            if (!destRev) {
               break;
             }
 
             await this.repository.rebaseRetryImmutable({
               sourceRev: sourceChangeId,
-              destRev: selection.changeId,
+              destRev,
               withDescendants,
             });
             await this.workspaceSCM?.checkForUpdates(
@@ -529,7 +487,7 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
 
     const changes = parseJJLog(output);
 
-    const status = await this.repository.getStatus({ useCache: true });
+    const status = await this.repository.getStatus({ useCache: false });
     const workingCopyId = status.workingCopy.changeId;
 
     this.selectedNodes.clear();
@@ -892,4 +850,213 @@ export async function promptPushBookmark(
       `Failed to push bookmark${error instanceof Error ? `: ${error.message}` : ''}`,
     );
   }
+}
+
+export interface CommitQuickPickItem extends vscode.QuickPickItem {
+  changeId: string;
+  commitId: string;
+}
+
+/**
+ * Creates a QuickPickItem representation of a JJ change for commit selection popups.
+ */
+export function createCommitQuickPickItem(
+  change: ChangeWithDetails,
+): CommitQuickPickItem {
+  const shortChange = change.changeId.substring(0, 8);
+  const shortCommit = change.commitId.substring(0, 8);
+  const firstLine = change.description
+    ? change.description.split('\n')[0]
+    : '(no description)';
+  const bookmarkStr =
+    change.bookmarks.length > 0 ? ` [${change.bookmarks.join(', ')}]` : '';
+  return {
+    label: `$(git-commit) ${firstLine}`,
+    description: `${shortChange}${bookmarkStr} (${shortCommit})`,
+    detail: `Change: ${change.changeId} • Commit: ${change.commitId} • ${change.author.name}`,
+    changeId: change.changeId,
+    commitId: change.commitId,
+  };
+}
+
+/**
+ * Retrieves candidate changes for a rebase operation.
+ * Prioritizes the user's commits (mine()), their parents, the current working stack,
+ * and the configured main branch bookmark, supplemented with recent commits.
+ */
+export async function getRebaseCandidateChanges(
+  repository: JJRepository,
+  sourceChangeId: string,
+): Promise<ChangeWithDetails[]> {
+  const scopeUri = repository.repositoryRoot
+    ? vscode.Uri.file(repository.repositoryRoot)
+    : undefined;
+  const mainBookmark = getMainBookmark(scopeUri);
+
+  // Revset for essential commits: main branch, user's commits, their parents, working copy & current stack
+  const essentialRevset = `present(${JSON.stringify(mainBookmark)}) | present("main") | present(trunk()) | mine() | parents(mine()) | (mutable() & ::@) | @`;
+
+  const [essentialChanges, recentChanges] = await Promise.all([
+    repository
+      .getChanges([essentialRevset], { noIntegrate: true })
+      .catch(() => [] as ChangeWithDetails[]),
+    repository
+      .getChanges(['all()'], { noIntegrate: true, limit: 100 })
+      .catch(() => repository.getChanges([], { noIntegrate: true }))
+      .catch(() => [] as ChangeWithDetails[]),
+  ]);
+
+  const seenChangeIds = new Set<string>();
+  const candidates: ChangeWithDetails[] = [];
+
+  for (const change of [...essentialChanges, ...recentChanges]) {
+    if (change.changeId === sourceChangeId) {
+      continue;
+    }
+    if (!seenChangeIds.has(change.changeId)) {
+      seenChangeIds.add(change.changeId);
+      candidates.push(change);
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Shows an interactive QuickPick popup to select a destination commit for rebasing.
+ * Opens the popup immediately, loads candidate commits asynchronously in the background,
+ * and dynamically looks up change IDs or revision patterns entered by the user after a 0.5s delay.
+ */
+export async function promptRebaseDestination(
+  repository: JJRepository,
+  sourceChangeId: string,
+  withDescendants: boolean,
+): Promise<string | undefined> {
+  const sourceShortId = sourceChangeId.substring(0, 8);
+
+  const title = withDescendants
+    ? `Rebase ${sourceShortId} (including descendants) onto...`
+    : `Rebase ${sourceShortId} (without descendants) onto...`;
+
+  const quickPick = vscode.window.createQuickPick<CommitQuickPickItem>();
+  quickPick.title = title;
+  quickPick.placeholder =
+    'Select destination commit (search description, commit ID, change ID, bookmarks)...';
+  quickPick.matchOnDescription = true;
+  quickPick.matchOnDetail = true;
+  quickPick.busy = true;
+
+  const itemsMap = new Map<string, CommitQuickPickItem>();
+
+  return new Promise<string | undefined>((resolve) => {
+    let debounceTimer: NodeJS.Timeout | undefined;
+    let isDisposed = false;
+
+    // Open popup immediately so user does not experience any UI delay
+    quickPick.show();
+
+    // Asynchronously load candidate commits
+    void (async () => {
+      try {
+        const candidateChanges = await getRebaseCandidateChanges(
+          repository,
+          sourceChangeId,
+        );
+        if (isDisposed) {
+          return;
+        }
+        for (const change of candidateChanges) {
+          if (!itemsMap.has(change.changeId)) {
+            itemsMap.set(change.changeId, createCommitQuickPickItem(change));
+          }
+        }
+        quickPick.items = Array.from(itemsMap.values());
+      } catch {
+        // Ignore loading errors
+      } finally {
+        if (!isDisposed) {
+          quickPick.busy = false;
+        }
+      }
+    })();
+
+    // Dynamically look up commits when the user types a change ID or revision pattern
+    quickPick.onDidChangeValue((value) => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+      }
+
+      const query = value.trim();
+      // Only trigger dynamic query if pattern looks like a change ID, commit hash, or revision name
+      if (query.length < 2 || !/^[a-zA-Z0-9@_.-]+$/.test(query)) {
+        return;
+      }
+
+      debounceTimer = setTimeout(() => {
+        void (async () => {
+          if (isDisposed) {
+            return;
+          }
+
+          const lowerQuery = query.toLowerCase();
+          let alreadyHasCandidate = false;
+          for (const item of itemsMap.values()) {
+            if (
+              item.changeId.toLowerCase().startsWith(lowerQuery) ||
+              item.commitId.toLowerCase().startsWith(lowerQuery)
+            ) {
+              alreadyHasCandidate = true;
+              break;
+            }
+          }
+
+          if (alreadyHasCandidate) {
+            return;
+          }
+
+          quickPick.busy = true;
+          try {
+            const lookedUpChanges = await repository.getChanges([query], {
+              noIntegrate: true,
+            });
+            let addedNew = false;
+            for (const change of lookedUpChanges) {
+              if (
+                change.changeId !== sourceChangeId &&
+                !itemsMap.has(change.changeId)
+              ) {
+                itemsMap.set(change.changeId, createCommitQuickPickItem(change));
+                addedNew = true;
+              }
+            }
+            if (addedNew && !isDisposed) {
+              quickPick.items = Array.from(itemsMap.values());
+            }
+          } catch {
+            // Query was not a valid revision or revision was not found, ignore
+          } finally {
+            if (!isDisposed) {
+              quickPick.busy = false;
+            }
+          }
+        })();
+      }, 500);
+    });
+
+    quickPick.onDidAccept(() => {
+      const selection = quickPick.selectedItems[0];
+      resolve(selection?.changeId);
+      quickPick.hide();
+    });
+
+    quickPick.onDidHide(() => {
+      isDisposed = true;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      quickPick.dispose();
+      resolve(undefined);
+    });
+  });
 }

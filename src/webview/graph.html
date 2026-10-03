@@ -267,6 +267,7 @@
         const message = event.data;
         switch (message.command) {
           case 'updateGraph':
+            commitFilesCache.clear();
             selectedNodes.clear();
             document.querySelectorAll('.change-node').forEach((n) => {
               n.classList.remove('selected', 'highlighted', 'dimmed');

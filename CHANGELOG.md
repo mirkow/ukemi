@@ -1,11 +1,21 @@
 # Change Log
 
+## 0.0.16
+
+- Ensure rebase destination popup always includes mutable commits, their parents, working copy, and configured main branch bookmark alongside recent commits.
+- Add dynamic search in rebase destination popup: typing a change ID / revision pattern automatically queries and displays matching commits after a 0.5s debounce.
+- Fix bug where changed files and conflict statuses in the Source Control Graph did not refresh or display conflicted state.
+- Ensure conflicted files without working copy changes are displayed as conflicts in the status file list.
+
+## 0.0.15
+
+- Fix commit file diffs in Source Control Graph and Commits tree view to compare directly against the parent revision rather than grandparent.
+
 ## 0.0.14
 
 - Add context menu action to set or move bookmarks (`jj bookmark set`) with QuickPick selection of existing bookmarks or creation of new bookmark names.
 - Add context menu action to push bookmark/branch to remote (`jj git push --bookmark <name>`) when a commit has associated bookmarks.
 - Update "Fetch and sync to main" to "Fetch and rebase branch on `<main>`" using whole-branch rebasing (`jj rebase -b`) to automatically rebase the entire stack off main.
-- Fix commit file diffs in Source Control Graph and Commits tree view to compare directly against the parent revision rather than grandparent.
 - Actively trigger change detection and graph/SCM refresh immediately upon completion of mutating commands.
 
 ## 0.0.13

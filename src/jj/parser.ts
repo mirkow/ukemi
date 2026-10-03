@@ -164,6 +164,20 @@ export async function parseJJStatus(
     }
   }
 
+  for (const conflictedFilePath of conflictedFiles) {
+    if (!fileStatuses.some((fs) => fs.path === conflictedFilePath)) {
+      const relativePath = path
+        .relative(repositoryRoot, conflictedFilePath)
+        .replace(/\\/g, '/');
+      fileStatuses.push({
+        type: 'M',
+        file: relativePath,
+        path: conflictedFilePath,
+        isConflict: true,
+      });
+    }
+  }
+
   return {
     fileStatuses: fileStatuses,
     workingCopy,
