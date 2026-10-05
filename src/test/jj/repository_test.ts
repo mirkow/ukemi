@@ -91,6 +91,8 @@ suite('JJRepository', () => {
             file: relativeFilePath,
             path: filePath,
             type: 'A',
+            linesAdded: 1,
+            linesRemoved: 0,
           },
         ],
       } satisfies Partial<Show>);
@@ -103,6 +105,11 @@ suite('JJRepository', () => {
         isConflict: false,
         isEmpty: false,
         isImmutable: false,
+        fileCounts: {
+          added: 1,
+          modified: 0,
+          deleted: 0,
+        },
       } satisfies Partial<ChangeWithDetails>);
       assert.match(show[0].change.changeId, /^[k-z]{32}$/);
       assert.match(show[0].change.commitId, /^[a-f0-9]{40}$/);
@@ -121,6 +128,11 @@ suite('JJRepository', () => {
         isImmutable: true,
         isCurrentWorkingCopy: false,
         isSynced: true,
+        fileCounts: {
+          added: 0,
+          modified: 0,
+          deleted: 0,
+        },
       } satisfies Partial<ChangeWithDetails>);
       assert.deepStrictEqual(show[1].conflictedFiles, new Set<string>());
       assert.deepStrictEqual(show[1].fileStatuses, []);
@@ -153,6 +165,11 @@ suite('JJRepository', () => {
         isConflict: false,
         isEmpty: false,
         isImmutable: false,
+        fileCounts: {
+          added: 2,
+          modified: 0,
+          deleted: 0,
+        },
       } satisfies Partial<ChangeWithDetails>);
       assert.match(changes[0].changeId, /^[k-z]{32}$/);
       assert.match(changes[0].commitId, /^[a-f0-9]{40}$/);
@@ -171,6 +188,11 @@ suite('JJRepository', () => {
         isImmutable: true,
         isCurrentWorkingCopy: false,
         isSynced: true,
+        fileCounts: {
+          added: 0,
+          modified: 0,
+          deleted: 0,
+        },
       } satisfies Partial<ChangeWithDetails>);
     });
   });
@@ -528,7 +550,7 @@ suite('parseRenamePaths', () => {
 suite('parseJJLog', () => {
   test('should parse normal commit', () => {
     const log =
-      'JJLOGSTART|kkmpptxz|kkm|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago|main|e14df8|e14|○|false|false|false|Initial commit\n';
+      'JJLOGSTART|kkmpptxz|kkm|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago|main|e14df8|e14|○|false|false|false|"Initial commit\\n"\n';
     const nodes = parseJJLog(log);
     assert.strictEqual(nodes.length, 1);
     assert.strictEqual(nodes[0].contextValue, 'kkmpptxz');
@@ -541,7 +563,7 @@ suite('parseJJLog', () => {
 
   test('should parse commit with conflict and include conflict in tooltip', () => {
     const log =
-      'JJLOGSTART|conflict123|conf|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||c0ff1ee|c0f|○|false|false|true|Resolve conflict\n';
+      'JJLOGSTART|conflict123|conf|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||c0ff1ee|c0f|○|false|false|true|"Resolve conflict\\n"\n';
     const nodes = parseJJLog(log);
     assert.strictEqual(nodes.length, 1);
     assert.strictEqual(nodes[0].contextValue, 'conflict123');
@@ -550,5 +572,79 @@ suite('parseJJLog', () => {
       nodes[0].tooltip,
       'Resolve conflict\n\n(conflict)\n\nauthor@example.com 2026-08-26 12:00:00',
     );
+  });
+
+  test('should parse multi-line description containing a pipe', () => {
+    const log =
+      'JJLOGSTART|multi123|mul|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||abc123|abc|○|false|false|false|"Subject | with pipe\\n\\nBody line \\"quoted\\"\\n"\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].description, 'Subject | with pipe');
+    assert.strictEqual(nodes[0].label, 'Subject | with pipe');
+    assert.strictEqual(
+      nodes[0].fullDescription,
+      'Subject | with pipe\n\nBody line "quoted"',
+    );
+    assert.strictEqual(
+      nodes[0].tooltip,
+      'Subject | with pipe\n\nBody line "quoted"\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
+  });
+
+  test('should parse empty description', () => {
+    const log =
+      'JJLOGSTART|empty123|emp|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||def456|def|@|true|false|false|""\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].fullDescription, '');
+    assert.strictEqual(nodes[0].description, '(empty) (no description set)');
+    assert.strictEqual(
+      nodes[0].tooltip,
+      '(empty) (no description set)\n\nauthor@example.com 2026-08-26 12:00:00',
+    );
+  });
+
+  test('should parse description when an earlier field contains a pipe', () => {
+    const log =
+      'JJLOGSTART|pipe123|pip|root()|a|b@example.com|2026-08-26 12:00:00|5 minutes ago||abc123|abc|○|false|false|false|"Subject\\n\\nBody | text\\n"\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].description, 'Subject');
+    assert.strictEqual(nodes[0].fullDescription, 'Subject\n\nBody | text');
+  });
+
+  test('should strip CRLF from the first line of the description', () => {
+    const log =
+      'JJLOGSTART|crlf123|crl|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||abc123|abc|○|false|false|false|"Subject\\r\\nBody\\r\\n"\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].description, 'Subject');
+    assert.strictEqual(nodes[0].label, 'Subject');
+    assert.strictEqual(nodes[0].fullDescription, 'Subject\r\nBody');
+  });
+
+  test('should parse per-commit file status counts when present', () => {
+    const log =
+      'JJLOGSTART|fc123|fc|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||abc123|abc|○|false|false|false|added,added,modified,renamed,removed|"Update files\\n"\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.deepStrictEqual(nodes[0].fileCounts, {
+      added: 2,
+      modified: 2,
+      deleted: 1,
+    });
+    assert.strictEqual(nodes[0].description, 'Update files');
+  });
+
+  test('should parse zero file status counts for empty file statuses field', () => {
+    const log =
+      'JJLOGSTART|emptyfc|efc|root()|author@example.com|2026-08-26 12:00:00|5 minutes ago||abc123|abc|@|true|false|false||"Empty\\n"\n';
+    const nodes = parseJJLog(log);
+    assert.strictEqual(nodes.length, 1);
+    assert.deepStrictEqual(nodes[0].fileCounts, {
+      added: 0,
+      modified: 0,
+      deleted: 0,
+    });
   });
 });

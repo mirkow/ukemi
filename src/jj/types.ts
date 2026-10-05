@@ -5,12 +5,20 @@ export interface ShowTemplateField {
 
 export type FileStatusType = 'A' | 'M' | 'D' | 'R' | 'C';
 
+export interface FileStatusCounts {
+  added: number;
+  modified: number;
+  deleted: number;
+}
+
 export type FileStatus = {
   type: FileStatusType;
   file: string;
   path: string;
   renamedFrom?: string;
   isConflict?: boolean;
+  linesAdded?: number;
+  linesRemoved?: number;
 };
 
 export interface Change {
@@ -32,6 +40,7 @@ export interface ChangeWithDetails extends Change {
   parentChangeIds: string[];
   isCurrentWorkingCopy: boolean;
   isSynced: boolean;
+  fileCounts?: FileStatusCounts;
 }
 
 export type RepositoryStatus = {

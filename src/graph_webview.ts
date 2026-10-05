@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import type { JJRepository } from './jj/repository';
-import type { ChangeWithDetails } from './jj/types';
+import { parseFileStatusCounts, type JJRepository } from './jj/repository';
+import type { ChangeWithDetails, FileStatusCounts } from './jj/types';
 import type { WorkspaceSourceControlManager } from './scm/workspace';
 import path from 'path';
 import { getGraphConfig, getMainBookmark } from './config';
@@ -31,6 +31,8 @@ type Message =
         file: string;
         path: string;
         renamedFrom?: string;
+        linesAdded?: number;
+        linesRemoved?: number;
       };
     }
   | {
@@ -95,6 +97,13 @@ export class ChangeNode {
     readonly timestampAgo?: string,
     readonly isEmpty?: boolean,
     readonly isConflict?: boolean,
+    /**
+     * The full (multi-line) commit description, trimmed of trailing
+     * whitespace. Unlike `description`, it has no "(empty)" prefix and no
+     * "(no description set)" placeholder (empty string if not set).
+     */
+    readonly fullDescription?: string,
+    readonly fileCounts?: FileStatusCounts,
   ) {}
 }
 
@@ -440,7 +449,9 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
     }
 
     // Use a custom template to ensure we get all the fields we need in a parseable format
-    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|is_immutable|is_conflict|description
+    // Format: JJLOGSTART|change_id|parents|email|timestamp|bookmarks|commit_id|branch_indicator|is_empty|is_immutable|is_conflict|file_statuses|description
+    // The description is the full description as a JSON string literal (escape_json), so that
+    // multi-line descriptions stay on a single line. It may contain '|', hence it must be the last field.
     const template = `
       concat(
         "JJLOGSTART|",
@@ -457,7 +468,8 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         if(self.empty(), "true", "false"), "|",
         if(self.immutable(), "true", "false"), "|",
         if(self.conflict(), "true", "false"), "|",
-        description.first_line(),
+        diff.files().map(|entry| entry.status()).join(","), "|",
+        description.escape_json(),
         "\\n"
       )
     `;
@@ -555,7 +567,10 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
         nodeA.tooltip === nodeB.tooltip &&
         nodeA.description === nodeB.description &&
         nodeA.contextValue === nodeB.contextValue &&
-        nodeA.isConflict === nodeB.isConflict
+        nodeA.isConflict === nodeB.isConflict &&
+        nodeA.fileCounts?.added === nodeB.fileCounts?.added &&
+        nodeA.fileCounts?.modified === nodeB.fileCounts?.modified &&
+        nodeA.fileCounts?.deleted === nodeB.fileCounts?.deleted
       );
     });
   }
@@ -563,6 +578,89 @@ export class JJGraphWebview implements vscode.WebviewViewProvider {
   dispose() {
     this.subscriptions.forEach((s) => s.dispose());
   }
+}
+
+/**
+ * Minimum number of '|'-separated fields preceding the description field
+ * following the "JJLOGSTART|" sentinel of the graph log template.
+ */
+const MIN_FIELDS_BEFORE_DESCRIPTION = 13;
+
+const VALID_FILE_STATUS_TOKENS = new Set([
+  'added',
+  'modified',
+  'removed',
+  'renamed',
+  'copied',
+  'A',
+  'M',
+  'D',
+  'R',
+  'C',
+]);
+
+function isFileStatusesField(value: string | undefined): value is string {
+  if (value === undefined) {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return true;
+  }
+  return trimmed
+    .split(',')
+    .every((token) => VALID_FILE_STATUS_TOKENS.has(token.trim()));
+}
+
+/**
+ * Matches the trailing JSON string literal (the `escape_json()` description) of
+ * a graph log line, including the '|' separator in front of it. Since a '"'
+ * inside a JSON string literal is always escaped, '|"' cannot occur within it,
+ * so the match starts at the real separator even if earlier fields (e.g. the
+ * author email or bookmark names) contain '|'.
+ */
+const TRAILING_JSON_DESCRIPTION_REGEX = /\|("(?:[^"\\]|\\.)*")\s*$/;
+
+/**
+ * Splits the data part of a graph log line (after the sentinel) into the fields
+ * preceding the description and the full description (trailing whitespace
+ * trimmed). If the description is not a valid JSON string literal, the raw
+ * remaining text is used instead, so that the node is kept (dropping it would
+ * break the parent links of other nodes). Returns undefined if the line has
+ * too few fields.
+ */
+function splitLogLine(
+  dataPart: string,
+): { fields: string[]; fullDescription: string } | undefined {
+  const match = TRAILING_JSON_DESCRIPTION_REGEX.exec(dataPart);
+  if (!match) {
+    const parts = dataPart.split('|');
+    if (parts.length <= MIN_FIELDS_BEFORE_DESCRIPTION) {
+      return undefined;
+    }
+    const descIndex =
+      parts.length > MIN_FIELDS_BEFORE_DESCRIPTION + 1 &&
+      isFileStatusesField(parts[MIN_FIELDS_BEFORE_DESCRIPTION])
+        ? MIN_FIELDS_BEFORE_DESCRIPTION + 1
+        : MIN_FIELDS_BEFORE_DESCRIPTION;
+    return {
+      fields: parts.slice(0, descIndex),
+      fullDescription: parts.slice(descIndex).join('|').trimEnd(),
+    };
+  }
+
+  const fields = dataPart.substring(0, match.index).split('|');
+  if (fields.length < MIN_FIELDS_BEFORE_DESCRIPTION) {
+    return undefined;
+  }
+  const jsonDescription = match[1];
+  let fullDescription: string;
+  try {
+    fullDescription = JSON.parse(jsonDescription) as string;
+  } catch {
+    fullDescription = jsonDescription;
+  }
+  return { fields, fullDescription: fullDescription.trimEnd() };
 }
 
 export function parseJJLog(output: string): ChangeNode[] {
@@ -577,11 +675,11 @@ export function parseJJLog(output: string): ChangeNode[] {
     }
 
     const dataPart = line.substring(sentinelIndex + 'JJLOGSTART|'.length);
-    const parts = dataPart.split('|');
-
-    if (parts.length < 14) {
+    const splitLine = splitLogLine(dataPart);
+    if (!splitLine) {
       continue;
     }
+    const { fields, fullDescription } = splitLine;
 
     const [
       changeId,
@@ -597,10 +695,14 @@ export function parseJJLog(output: string): ChangeNode[] {
       isEmptyStr,
       isImmutableStr,
       isConflictStr,
-      rawDescription,
-    ] = parts;
+      fileStatusesStr,
+    ] = fields;
 
-    let description = rawDescription;
+    const fileCounts = isFileStatusesField(fileStatusesStr)
+      ? parseFileStatusCounts(fileStatusesStr)
+      : undefined;
+
+    let description = fullDescription.split(/\r?\n/)[0];
     // const paddingMarker = "JJLOGSTART|";
 
     // Filter out redundant branch indicators or clean them up if needed
@@ -642,7 +744,8 @@ export function parseJJLog(output: string): ChangeNode[] {
     // Construct simplified label (though frontend uses description directly now)
     const formattedLabel = `${description}`;
     const conflictTooltip = isConflict ? '\n\n(conflict)' : '';
-    const tooltip = `${description}${conflictTooltip}\n\n${email} ${timestamp}`;
+    const emptyPrefix = isEmpty ? '(empty) ' : '';
+    const tooltip = `${emptyPrefix}${fullDescription || '(no description set)'}${conflictTooltip}\n\n${email} ${timestamp}`;
 
     changeNodes.push(
       new ChangeNode(
@@ -662,6 +765,8 @@ export function parseJJLog(output: string): ChangeNode[] {
         timestampAgo,
         isEmpty,
         isConflict,
+        fullDescription,
+        fileCounts,
       ),
     );
   }
@@ -1026,7 +1131,10 @@ export async function promptRebaseDestination(
                 change.changeId !== sourceChangeId &&
                 !itemsMap.has(change.changeId)
               ) {
-                itemsMap.set(change.changeId, createCommitQuickPickItem(change));
+                itemsMap.set(
+                  change.changeId,
+                  createCommitQuickPickItem(change),
+                );
                 addedNew = true;
               }
             }

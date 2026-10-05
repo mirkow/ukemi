@@ -5,6 +5,7 @@ import { TreeItemCollapsibleState, TreeView, Uri } from 'vscode';
 import {
   CommitFileTreeItem,
   CommitFilesGroupTreeItem,
+  formatFileStatusCounts,
   GraphTreeDataProvider,
   GraphTreeElement,
   GraphTreeItem,
@@ -66,7 +67,7 @@ suite('GraphTreeView', () => {
   test('getChildren on a commit returns files group and child commits', async () => {
     const fileName = 'tree_lazy_file.txt';
     const filePath = path.join(suiteDir, fileName);
-    await fs.writeFile(filePath, 'Lazy content');
+    await fs.writeFile(filePath, 'Lazy content\nLine 2');
     await repo.describe('@', 'Test commit parent');
     await repo.new();
 
@@ -102,16 +103,24 @@ suite('GraphTreeView', () => {
 
     const parentCommit = await findCommitInTree('Test commit parent');
     assert.ok(parentCommit, 'Expected to find parent commit in tree');
+    assert.ok(
+      String(parentCommit.description).includes('+1'),
+      `Expected parentCommit description to include +1, got: ${String(parentCommit.description)}`,
+    );
 
     // Children of parent commit should contain "files" group AND the child commit
     const commitChildren = await provider.getChildren(parentCommit);
-    assert.ok(commitChildren.length >= 2, 'Expected files group and child commit');
+    assert.ok(
+      commitChildren.length >= 2,
+      'Expected files group and child commit',
+    );
 
     const filesGroup = commitChildren.find(
       (item) => item instanceof CommitFilesGroupTreeItem,
     ) as CommitFilesGroupTreeItem;
     assert.ok(filesGroup, 'Expected files group item under commit');
     assert.strictEqual(filesGroup.label, 'files');
+    assert.strictEqual(filesGroup.description, '+1');
     assert.strictEqual(provider.getParent(filesGroup), parentCommit);
 
     const childCommit = commitChildren.find(
@@ -140,7 +149,18 @@ suite('GraphTreeView', () => {
     );
     assert.strictEqual(fileItem.contextValue, 'commitFile');
     assert.ok(fileItem.iconPath, 'Expected iconPath on fileItem');
-    assert.ok(fileItem.tooltip, 'Expected tooltip on fileItem');
+    const fileItemDesc =
+      typeof fileItem.description === 'string' ? fileItem.description : '';
+    assert.ok(
+      fileItemDesc.includes('+2'),
+      `Expected fileItem description to include +2, got: ${fileItemDesc}`,
+    );
+    const fileItemTooltip =
+      typeof fileItem.tooltip === 'string' ? fileItem.tooltip : '';
+    assert.ok(
+      fileItemTooltip.includes('(+2)'),
+      `Expected fileItem tooltip to include (+2), got: ${fileItemTooltip}`,
+    );
     assert.strictEqual(provider.getParent(fileItem), filesGroup);
 
     // Verify diff command on file item
@@ -148,17 +168,14 @@ suite('GraphTreeView', () => {
     assert.strictEqual(fileItem.command?.command, 'vscode.diff');
     assert.strictEqual(fileItem.command?.arguments?.length, 3);
 
-    const [leftUri, , title] = fileItem.command.arguments as [
-      Uri,
-      Uri,
-      string,
-    ];
+    const [leftUri, , title] = fileItem.command.arguments as [Uri, Uri, string];
     assert.strictEqual(leftUri.scheme, 'jj');
     const leftParams = getParams(leftUri);
     assert.ok('rev' in leftParams);
     assert.strictEqual(
       leftParams.rev,
-      parentCommit.getParentChangeIds()?.[0] || `${parentCommit.getChangeId()}-`,
+      parentCommit.getParentChangeIds()?.[0] ||
+        `${parentCommit.getChangeId()}-`,
     );
 
     assert.ok(
@@ -216,6 +233,20 @@ suite('GraphTreeView', () => {
     assert.strictEqual(toItalic('3 days'), '𝟥 𝘥𝘢𝘺𝘴');
     assert.strictEqual(toItalic('1 week'), '𝟣 𝘸𝘦𝘦𝘬');
     assert.strictEqual(toItalic('12 days'), '𝟣𝟤 𝘥𝘢𝘺𝘴');
+
+    assert.strictEqual(formatFileStatusCounts(undefined), '');
+    assert.strictEqual(
+      formatFileStatusCounts({ added: 0, modified: 0, deleted: 0 }),
+      '',
+    );
+    assert.strictEqual(
+      formatFileStatusCounts({ added: 2, modified: 1, deleted: 3 }),
+      '+2 ~1 -3',
+    );
+    assert.strictEqual(
+      formatFileStatusCounts({ added: 0, modified: 2, deleted: 0 }),
+      '~2',
+    );
   });
 
   test('setFilter filters commits by description and filename', async () => {

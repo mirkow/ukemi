@@ -18,9 +18,41 @@ import {
   Operation,
   ShowTemplateField,
   ChangeWithDetails,
+  FileStatusCounts,
 } from './types';
 import { getLogger } from '../logger';
 import { fakeEditorPath, prepareFakeeditor } from '../env';
+
+export function parseFileStatusCounts(statuses: string): FileStatusCounts {
+  const counts: FileStatusCounts = { added: 0, modified: 0, deleted: 0 };
+  if (!statuses) {
+    return counts;
+  }
+  for (const raw of statuses.split(',')) {
+    const status = raw.trim();
+    if (!status) {
+      continue;
+    }
+    if (
+      status === 'added' ||
+      status === 'A' ||
+      status === 'copied' ||
+      status === 'C'
+    ) {
+      counts.added++;
+    } else if (
+      status === 'modified' ||
+      status === 'M' ||
+      status === 'renamed' ||
+      status === 'R'
+    ) {
+      counts.modified++;
+    } else if (status === 'removed' || status === 'D') {
+      counts.deleted++;
+    }
+  }
+  return counts;
+}
 
 function getChangeTemplateFields(): ShowTemplateField[] {
   return [
@@ -108,6 +140,12 @@ function getChangeTemplateFields(): ShowTemplateField[] {
         show.change.isSynced = value === 'true';
       },
     },
+    {
+      template: 'diff.files().map(|entry| entry.status()).join(",")',
+      setter: (value, show) => {
+        show.change.fileCounts = parseFileStatusCounts(value);
+      },
+    },
   ];
 }
 
@@ -129,6 +167,7 @@ function createEmptyShow(): Show {
       isImmutable: false,
       isCurrentWorkingCopy: false,
       isSynced: false,
+      fileCounts: { added: 0, modified: 0, deleted: 0 },
     },
     fileStatuses: [],
     conflictedFiles: new Set<string>(),
@@ -413,6 +452,30 @@ export class JJRepository {
     if (isConflictDetectionSupported) {
       templateFields.push({
         template: `diff.files().map(|entry| entry.status() ++ "${summarySeparator}" ++ entry.source().path().display() ++ "${summarySeparator}" ++ entry.target().path().display() ++ "${summarySeparator}" ++ entry.target().conflict()).join("\n")`,
+      });
+      templateFields.push({
+        template: `diff.stat().files().map(|entry| entry.path().display() ++ "${summarySeparator}" ++ entry.lines_added() ++ "${summarySeparator}" ++ entry.lines_removed()).join("\n")`,
+        setter: (value, show) => {
+          const statLines = value.split('\n').filter(Boolean);
+          for (let idx = 0; idx < statLines.length; idx++) {
+            const [rawPath, addedStr, removedStr] =
+              statLines[idx].split(summarySeparator);
+            const normalizedPath = path.normalize(rawPath).replace(/\\/g, '/');
+            const linesAdded = parseInt(addedStr, 10);
+            const linesRemoved = parseInt(removedStr, 10);
+            const fileStatus =
+              show.fileStatuses.find((f) => f.file === normalizedPath) ??
+              show.fileStatuses[idx];
+            if (fileStatus) {
+              if (!isNaN(linesAdded)) {
+                fileStatus.linesAdded = linesAdded;
+              }
+              if (!isNaN(linesRemoved)) {
+                fileStatus.linesRemoved = linesRemoved;
+              }
+            }
+          }
+        },
       });
     } else {
       templateFields.push({ template: 'diff.summary()' });

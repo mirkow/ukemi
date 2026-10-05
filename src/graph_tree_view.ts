@@ -14,13 +14,30 @@ import {
   ThemeColor,
   Uri,
 } from 'vscode';
-import { ChangeWithDetails, FileStatus } from './jj/types';
+import { ChangeWithDetails, FileStatus, FileStatusCounts } from './jj/types';
 import { JJRepository } from './jj/repository';
 import { toJJUri } from './uri';
 import { getLogger } from './logger';
 import { getGraphConfig } from './config';
 import { formatRelativeTime, toItalic } from './utils';
 import path from 'path';
+
+export function formatFileStatusCounts(counts?: FileStatusCounts): string {
+  if (!counts) {
+    return '';
+  }
+  const parts: string[] = [];
+  if (counts.added > 0) {
+    parts.push(`+${counts.added}`);
+  }
+  if (counts.modified > 0) {
+    parts.push(`~${counts.modified}`);
+  }
+  if (counts.deleted > 0) {
+    parts.push(`-${counts.deleted}`);
+  }
+  return parts.join(' ');
+}
 
 function getChangeDescription(change: ChangeWithDetails): TreeItemLabel {
   return {
@@ -159,10 +176,14 @@ export class GraphTreeItem extends TreeItem {
     this.iconPath = this.getIcon();
     const relativeTime = formatRelativeTime(change.authoredDate);
     const italicTime = relativeTime ? toItalic(relativeTime) : '';
+    const countsStr = formatFileStatusCounts(change.fileCounts);
     if (this.change.isEmpty) {
       this.description = italicTime ? `${italicTime} (empty)` : 'empty';
-    } else if (italicTime) {
-      this.description = italicTime;
+    } else {
+      const descParts = [italicTime, countsStr].filter(Boolean);
+      if (descParts.length > 0) {
+        this.description = descParts.join(' ');
+      }
     }
     const hasBookmark = this.change.bookmarks.length > 0;
     if (this.change.isImmutable) {
@@ -244,7 +265,13 @@ export class CommitFilesGroupTreeItem extends TreeItem {
     this.id = `${change.changeId}:files`;
     this.iconPath = new ThemeIcon('files');
     this.contextValue = 'commitFilesGroup';
-    this.tooltip = `Changed files for ${change.changeId.slice(0, 8)}`;
+    const countsStr = formatFileStatusCounts(change.fileCounts);
+    if (countsStr) {
+      this.description = countsStr;
+    }
+    this.tooltip = countsStr
+      ? `Changed files for ${change.changeId.slice(0, 8)} (${countsStr})`
+      : `Changed files for ${change.changeId.slice(0, 8)}`;
   }
 
   getChangeId(): string {
@@ -264,7 +291,9 @@ export class CommitFilesGroupTreeItem extends TreeItem {
       return false;
     }
     return (
-      this.id === other.id && this.collapsibleState === other.collapsibleState
+      this.id === other.id &&
+      this.collapsibleState === other.collapsibleState &&
+      this.description === other.description
     );
   }
 }
@@ -335,6 +364,20 @@ export class CommitFileTreeItem extends TreeItem {
       this.description = dirPrefix;
     }
 
+    const lineStatParts: string[] = [];
+    if (fileStatus.linesAdded && fileStatus.linesAdded > 0) {
+      lineStatParts.push(`+${fileStatus.linesAdded}`);
+    }
+    if (fileStatus.linesRemoved && fileStatus.linesRemoved > 0) {
+      lineStatParts.push(`-${fileStatus.linesRemoved}`);
+    }
+    const lineStatsStr = lineStatParts.join(' ');
+    if (lineStatsStr) {
+      this.description = this.description
+        ? `${this.description} ${lineStatsStr}`
+        : lineStatsStr;
+    }
+
     const statusLabel = fileStatus.isConflict
       ? 'Conflict'
       : fileStatus.type === 'A'
@@ -351,6 +394,9 @@ export class CommitFileTreeItem extends TreeItem {
       this.tooltip = `${statusLabel}: ${fileStatus.renamedFrom} → ${fileStatus.file}`;
     } else {
       this.tooltip = `${statusLabel}: ${fileStatus.file}`;
+    }
+    if (lineStatsStr) {
+      this.tooltip += ` (${lineStatsStr})`;
     }
 
     this.contextValue = 'commitFile';

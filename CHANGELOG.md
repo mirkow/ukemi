@@ -8,6 +8,8 @@
 - Fix the jj source control UI being torn down (and the Git extension taking over) when `jj root` fails transiently, e.g. with `ENOENT` right after an SSH reconnect. The previously detected repository is now kept and the failure is logged; only a "no jj repo" error removes it.
 - Fix a close/reopen loop with the built-in Git extension when a closed repository is reopened (via `Git: Reopen Closed Repositories` or by another extension). ukemi now closes each Git repository only once per detected Jujutsu repository and leaves it open if it is reopened.
 - Fix `Cannot read properties of undefined (reading 'repository')` errors in the background poll when the last Jujutsu repository is no longer detected (e.g. after its workspace folder was removed).
+- Show per-commit added, modified, and deleted file counts (`+X ~Y -Z`) on commit rows in the Source Control Graph webview and Commits tree view.
+- Show per-file added and deleted line counts (`+X -Y`) next to each changed file in the Source Control Graph webview and Commits tree view.
 
 ## 0.0.16
 

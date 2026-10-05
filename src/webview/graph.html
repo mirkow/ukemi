@@ -99,7 +99,7 @@
         addItem('Copy Description', 'codicon-copy', () => {
           vscode.postMessage({
             command: 'copyText',
-            text: (change.description || '').replace(/^\(empty\)\s*/, ''),
+            text: change.fullDescription,
           });
         });
 
@@ -456,6 +456,43 @@
         return sep;
       }
 
+      function createFileCountsSpan(fileCounts) {
+        if (
+          !fileCounts ||
+          (fileCounts.added === 0 &&
+            fileCounts.modified === 0 &&
+            fileCounts.deleted === 0)
+        ) {
+          return null;
+        }
+        const span = document.createElement('span');
+        span.className = 'commit-file-counts';
+        const tooltipParts = [];
+        if (fileCounts.added > 0) {
+          const addedSpan = document.createElement('span');
+          addedSpan.className = 'file-count-added';
+          addedSpan.textContent = `+${fileCounts.added}`;
+          span.appendChild(addedSpan);
+          tooltipParts.push(`${fileCounts.added} added`);
+        }
+        if (fileCounts.modified > 0) {
+          const modifiedSpan = document.createElement('span');
+          modifiedSpan.className = 'file-count-modified';
+          modifiedSpan.textContent = `~${fileCounts.modified}`;
+          span.appendChild(modifiedSpan);
+          tooltipParts.push(`${fileCounts.modified} modified`);
+        }
+        if (fileCounts.deleted > 0) {
+          const deletedSpan = document.createElement('span');
+          deletedSpan.className = 'file-count-deleted';
+          deletedSpan.textContent = `-${fileCounts.deleted}`;
+          span.appendChild(deletedSpan);
+          tooltipParts.push(`${fileCounts.deleted} deleted`);
+        }
+        span.title = tooltipParts.join(', ');
+        return span;
+      }
+
       function updateConnections() {
         const nodes = document.querySelectorAll('.change-node');
 
@@ -774,6 +811,21 @@
             tagClass = 'file-tag-R';
           }
 
+          const hasLinesAdded =
+            typeof file.linesAdded === 'number' && file.linesAdded > 0;
+          const hasLinesRemoved =
+            typeof file.linesRemoved === 'number' && file.linesRemoved > 0;
+          if (hasLinesAdded || hasLinesRemoved) {
+            const statParts = [];
+            if (hasLinesAdded) {
+              statParts.push(`+${file.linesAdded}`);
+            }
+            if (hasLinesRemoved) {
+              statParts.push(`-${file.linesRemoved}`);
+            }
+            statusTooltip += ` (${statParts.join(' ')})`;
+          }
+
           fileItem.title = statusTooltip;
 
           const infoDiv = document.createElement('div');
@@ -800,6 +852,24 @@
             tagSpan.className = `file-tag ${tagClass}`;
             tagSpan.textContent = tagText;
             infoDiv.appendChild(tagSpan);
+          }
+
+          if (hasLinesAdded || hasLinesRemoved) {
+            const lineStatsSpan = document.createElement('span');
+            lineStatsSpan.className = 'file-line-stats';
+            if (hasLinesAdded) {
+              const addedSpan = document.createElement('span');
+              addedSpan.className = 'file-lines-added';
+              addedSpan.textContent = `+${file.linesAdded}`;
+              lineStatsSpan.appendChild(addedSpan);
+            }
+            if (hasLinesRemoved) {
+              const removedSpan = document.createElement('span');
+              removedSpan.className = 'file-lines-removed';
+              removedSpan.textContent = `-${file.linesRemoved}`;
+              lineStatsSpan.appendChild(removedSpan);
+            }
+            infoDiv.appendChild(lineStatsSpan);
           }
 
           fileItem.appendChild(infoDiv);
@@ -973,6 +1043,11 @@
             nodeDescription.textContent = change.description;
             infoColumn.appendChild(nodeDescription);
 
+            const fileCountsSpan = createFileCountsSpan(change.fileCounts);
+            if (fileCountsSpan) {
+              infoColumn.appendChild(fileCountsSpan);
+            }
+
             if (shouldShowTimestamp) {
               const timeSpan = document.createElement('span');
               timeSpan.className = 'timestamp';
@@ -1031,6 +1106,12 @@
               timeSpan.className = 'timestamp';
               timeSpan.textContent = change.timestampAgo;
               metaInfo.appendChild(timeSpan);
+            }
+
+            const fileCountsSpan = createFileCountsSpan(change.fileCounts);
+            if (fileCountsSpan) {
+              metaInfo.appendChild(createSeparator());
+              metaInfo.appendChild(fileCountsSpan);
             }
 
             textContent.appendChild(metaInfo);

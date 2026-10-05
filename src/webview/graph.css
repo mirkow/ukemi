@@ -432,24 +432,58 @@ body {
 }
 
 /* File status colors */
-.file-status-A, .file-tag-A {
+.file-status-A,
+.file-tag-A,
+.file-count-added,
+.file-lines-added {
   color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
 }
 
-.file-status-M, .file-tag-M {
+.file-status-M,
+.file-tag-M,
+.file-count-modified {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
 }
 
-.file-status-D, .file-tag-D {
+.file-status-D,
+.file-tag-D,
+.file-count-deleted,
+.file-lines-removed {
   color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
 }
 
-.file-status-R, .file-tag-R {
+.file-status-R,
+.file-tag-R {
   color: var(--vscode-gitDecoration-renamedResourceForeground, #73b7f2);
 }
 
-.file-status-conflict, .file-tag-conflict {
+.file-status-conflict,
+.file-tag-conflict {
   color: var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.commit-file-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  font-style: normal;
+  font-family: var(--vscode-editor-font-family);
+  flex-shrink: 0;
+}
+
+#nodes.compact .info-column .commit-file-counts {
+  font-size: 0.8em;
+}
+
+.file-line-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  font-family: var(--vscode-editor-font-family);
+  margin-left: 4px;
+  flex-shrink: 0;
 }
 
 /* File action buttons */
@@ -490,10 +524,14 @@ body {
 
 .file-action-btn:hover {
   opacity: 1;
-  background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  background-color: var(
+    --vscode-toolbar-hoverBackground,
+    rgba(90, 93, 94, 0.31)
+  );
 }
 
-.file-loading-spinner, .file-empty-msg {
+.file-loading-spinner,
+.file-empty-msg {
   padding: 4px 6px;
   font-size: 0.85em;
   opacity: 0.7;
@@ -542,4 +580,3 @@ body {
   background-color: var(--vscode-menu-separatorBackground, #454545);
   margin: 4px 0;
 }
-
